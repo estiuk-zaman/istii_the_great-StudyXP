@@ -1,0 +1,49 @@
+name: Build istii_the_great APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Debug APK
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate Gradle project
+        id: loc
+        run: |
+          f=$(find . -name settings.gradle -not -path './.git/*' | head -1)
+          if [ -z "$f" ]; then
+            echo "settings.gradle paoa jay nai. Repo tree:"
+            find . -not -path './.git/*' -maxdepth 3
+            exit 1
+          fi
+          d=$(dirname "$f")
+          echo "Project dir: $d"
+          echo "dir=$d" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.1'
+
+      - name: List projects
+        working-directory: ${{ steps.loc.outputs.dir }}
+        run: gradle projects
+
+      - name: Build debug APK
+        working-directory: ${{ steps.loc.outputs.dir }}
+        run: gradle assembleDebug --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: istii-the-great-debug-apk
+          path: ${{ steps.loc.outputs.dir }}/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
