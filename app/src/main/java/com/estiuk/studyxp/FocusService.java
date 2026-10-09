@@ -1,0 +1,164 @@
+package com.estiuk.studyxp;
+
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.app.Service;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.ServiceInfo;
+import android.os.Build;
+import android.os.Handler;
+import android.os.IBinder;
+import android.os.Looper;
+
+/**
+ * Runs only while a focus session is running. Fires pomodoro / goal alerts and the
+ * Focus Guard warning when a social app is opened. Everything stays on the phone.
+ */
+public class FocusService extends Service {
+    static final int ID = 71;
+    static final String CH_FOCUS = "focus", CH_ALERT = "alerts";
+
+    private Store st;
+    private final Handler h = new Handler(Looper.getMainLooper());
+    private long lastStrikeAt = 0, lastNotifAt = 0;
+    private int alertId = 100;
+
+    private final Runnable loop = new Runnable() {
+        @Override public void run() {
+            try { tick(); } catch (Throwable t) { App.report(t); }
+        }
+    };
+
+    static void start(Context c) {
+        try { c.startForegroundService(new Intent(c, FocusService.class)); } catch (Throwable t) { App.report(t); }
+    }
+
+    static void stop(Context c) {
+        try { c.stopService(new Intent(c, FocusService.class)); } catch (Throwable ignored) { }
+    }
+
+    @Override public void onCreate() {
+        super.onCreate();
+        st = new Store(this);
+        Lang.bn = st.bn();
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            nm.createNotificationChannel(new NotificationChannel(CH_FOCUS, Lang.t("Focus session", "ফোকাস সেশন"), NotificationManager.IMPORTANCE_LOW));
+            NotificationChannel a = new NotificationChannel(CH_ALERT, Lang.t("Alerts", "অ্যালার্ট"), NotificationManager.IMPORTANCE_HIGH);
+            a.enableVibration(true);
+            nm.createNotificationChannel(a);
+        } catch (Throwable t) { App.report(t); }
+    }
+
+    @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        try {
+            Notification n = ongoing();
+            if (Build.VERSION.SDK_INT >= 34) startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+            else startForeground(ID, n);
+        } catch (Throwable t) {
+            App.report(t);
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+        h.removeCallbacks(loop);
+        h.post(loop);
+        return START_NOT_STICKY;
+    }
+
+    @Override public void onDestroy() {
+        h.removeCallbacks(loop);
+        super.onDestroy();
+    }
+
+    @Override public IBinder onBind(Intent intent) { return null; }
+
+    private PendingIntent open() {
+        Intent i = new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
+        return PendingIntent.getActivity(this, 0, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+    }
+
+    private String clock(long s) {
+        return String.format(java.util.Locale.US, "%02d:%02d", s / 60, s % 60);
+    }
+
+    private Notification ongoing() {
+        String text;
+        if (!st.sessionOpen()) text = Lang.t("Focus session", "ফোকাস সেশন");
+        else if (st.sessionMode() == 1) {
+            long[] ps = st.pomoState();
+            text = (ps[0] == 0 ? Lang.t("Focus · ", "ফোকাস · ") : Lang.t("Break · ", "বিরতি · ")) + clock(ps[1]) + Lang.t(" left", " বাকি");
+        } else text = Lang.t("Focusing · ", "ফোকাস চলছে · ") + clock(st.sessionSeconds());
+        return new Notification.Builder(this, CH_FOCUS)
+                .setSmallIcon(R.drawable.ic_stat)
+                .setContentTitle("istii_the_great")
+                .setContentText(text)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setContentIntent(open())
+                .build();
+    }
+
+    private void alert(String title, String text, boolean sound) {
+        try {
+            Notification n = new Notification.Builder(this, CH_ALERT)
+                    .setSmallIcon(R.drawable.ic_stat)
+                    .setContentTitle(title)
+                    .setContentText(text)
+                    .setAutoCancel(true)
+                    .setContentIntent(open())
+                    .build();
+            ((NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE)).notify(alertId++, n);
+            if (st.hap()) Sfx.vibrate(this, 0, 200, 100, 200);
+            if (sound && st.sfx()) Sfx.alarm(st, this);
+        } catch (Throwable t) { App.report(t); }
+    }
+
+    private String label(String pkg) {
+        try {
+            PackageManager pm = getPackageManager();
+            ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+            return String.valueOf(pm.getApplicationLabel(ai));
+        } catch (Throwable t) {
+            return pkg;
+        }
+    }
+
+    private void tick() {
+        if (!st.sessionRunning()) {
+            stopSelf();
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (!MainActivity.visible) {
+            int b = st.pollBoundary();
+            if (b == 1) alert(Lang.t("Pomodoro done 🍅", "পোমোডোরো শেষ 🍅"), Lang.t("Take a ", "নাও ") + st.sessionBreak() + Lang.t(" min break.", " মিনিটের বিরতি।"), true);
+            else if (b == 2) alert(Lang.t("Break over", "বিরতি শেষ"), Lang.t("Back to focus!", "আবার ফোকাসে ফেরো!"), true);
+            else if (b == 3) alert(Lang.t("Goal reached 🎯", "লক্ষ্য পূরণ 🎯"), Lang.t("Open the app and finish to bank your XP.", "XP পেতে অ্যাপ খুলে Finish চাপো।"), true);
+
+            if (st.guard() && st.hasUsageAccess() && now - lastStrikeAt > 45000) {
+                String pkg = st.foregroundPackage();
+                if (pkg != null) {
+                    for (String d : Store.DISTRACT) {
+                        if (d.equals(pkg)) {
+                            lastStrikeAt = now;
+                            st.addStrike();
+                            alert(Lang.t("Stay focused! 🌲", "ফোকাসে থাকো! 🌲"),
+                                    label(pkg) + Lang.t(" opened during your focus session.", " ফোকাস সেশনের সময় খোলা হয়েছে।"), false);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (now - lastNotifAt > 15000) {
+            lastNotifAt = now;
+            try { ((NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE)).notify(ID, ongoing()); } catch (Throwable ignored) { }
+        }
+        h.postDelayed(loop, 3000);
+    }
+}
