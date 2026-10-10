@@ -26,6 +26,7 @@ public class FocusService extends Service {
     private Store st;
     private final Handler h = new Handler(Looper.getMainLooper());
     private long lastStrikeAt = 0, lastNotifAt = 0;
+    private String lastKey = "";
     private int alertId = 100;
 
     private final Runnable loop = new Runnable() {
@@ -87,20 +88,42 @@ public class FocusService extends Service {
     }
 
     private Notification ongoing() {
+        boolean open = st.sessionOpen(), run = st.sessionRunning();
+        long now = System.currentTimeMillis();
+        String subj = st.sessionSubject();
+        String title = Lang.t("Focusing", "ফোকাস চলছে") + (subj.isEmpty() ? "" : " · " + subj);
         String text;
-        if (!st.sessionOpen()) text = Lang.t("Focus session", "ফোকাস সেশন");
-        else if (st.sessionMode() == 1) {
-            long[] ps = st.pomoState();
-            text = (ps[0] == 0 ? Lang.t("Focus · ", "ফোকাস · ") : Lang.t("Break · ", "বিরতি · ")) + clock(ps[1]) + Lang.t(" left", " বাকি");
-        } else text = Lang.t("Focusing · ", "ফোকাস চলছে · ") + clock(st.sessionSeconds());
-        return new Notification.Builder(this, CH_FOCUS)
+        Notification.Builder b = new Notification.Builder(this, CH_FOCUS)
                 .setSmallIcon(R.drawable.ic_stat)
-                .setContentTitle("istii_the_great")
-                .setContentText(text)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
-                .setContentIntent(open())
-                .build();
+                .setContentIntent(open());
+        if (!open) {
+            text = Lang.t("Focus session", "ফোকাস সেশন");
+        } else if (!run) {
+            title = Lang.t("Paused", "পজ করা") + (subj.isEmpty() ? "" : " · " + subj);
+            text = Lang.t("Tap to resume · ", "চালু করতে ট্যাপ করো · ") + clock(st.sessionSeconds());
+            b.setShowWhen(false);
+        } else if (st.sessionMode() == 1) {
+            long[] ps = st.pomoState();
+            boolean br = ps[0] == 1;
+            title = (br ? Lang.t("Break", "বিরতি") : "🍅 " + Lang.t("Pomodoro focus", "পোমোডোরো ফোকাস")) + (subj.isEmpty() || br ? "" : " · " + subj);
+            text = br ? Lang.t("Relax - back to focus soon", "একটু জিরিয়ে নাও") : Lang.t("Stay with it, you're doing great", "চালিয়ে যাও, দারুণ হচ্ছে");
+            // live countdown drawn by the system itself, so it never freezes
+            b.setShowWhen(true).setUsesChronometer(true).setChronometerCountDown(true).setWhen(now + ps[1] * 1000L);
+        } else {
+            int g = st.sessionGoal();
+            text = g > 0 ? Lang.t("Goal: ", "লক্ষ্য: ") + g + Lang.t(" min", " মিনিট") : Lang.t("Free focus", "ফ্রি ফোকাস");
+            b.setShowWhen(true).setUsesChronometer(true).setWhen(now - st.sessionSeconds() * 1000L);
+        }
+        return b.setContentTitle(title).setContentText(text).build();
+    }
+
+    private String stateKey() {
+        if (!st.sessionOpen()) return "closed";
+        if (!st.sessionRunning()) return "paused";
+        if (st.sessionMode() == 1) return "pomo" + st.pomoState()[0] + ":" + st.pomoState()[3];
+        return "run";
     }
 
     private void alert(String title, String text, boolean sound) {
@@ -129,12 +152,12 @@ public class FocusService extends Service {
     }
 
     private void tick() {
-        if (!st.sessionRunning()) {
+        if (!st.sessionOpen()) {
             stopSelf();
             return;
         }
         long now = System.currentTimeMillis();
-        if (!MainActivity.visible) {
+        if (st.sessionRunning() && !MainActivity.visible) {
             int b = st.pollBoundary();
             if (b == 1) alert(Lang.t("Pomodoro done 🍅", "পোমোডোরো শেষ 🍅"), Lang.t("Take a ", "নাও ") + st.sessionBreak() + Lang.t(" min break.", " মিনিটের বিরতি।"), true);
             else if (b == 2) alert(Lang.t("Break over", "বিরতি শেষ"), Lang.t("Back to focus!", "আবার ফোকাসে ফেরো!"), true);
@@ -155,7 +178,9 @@ public class FocusService extends Service {
                 }
             }
         }
-        if (now - lastNotifAt > 15000) {
+        String key = stateKey();
+        if (!key.equals(lastKey) || now - lastNotifAt > 60000) {
+            lastKey = key;
             lastNotifAt = now;
             try { ((NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE)).notify(ID, ongoing()); } catch (Throwable ignored) { }
         }

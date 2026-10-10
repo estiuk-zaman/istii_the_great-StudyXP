@@ -72,7 +72,7 @@ public class MainActivity extends TabsB {
             st.sync();
             st.syncUsage();
             XpWidget.refresh(this);
-            if (st.sessionRunning()) FocusService.start(this);
+            if (st.sessionOpen()) FocusService.start(this);
             rebuild();
             milestones();
         } catch (Throwable e) {
@@ -130,6 +130,16 @@ public class MainActivity extends TabsB {
                 tv.setLayoutParams(ui.lpm(ui.dp(130), ui.dp(140), 0, 8, 0, 0));
                 celebrate(t("Level up", "লেভেল আপ"), tv, t("Level ", "লেভেল ") + (lv + 1) + " · " + Store.levelName(lv),
                         Store.stageName(lv), "🌲 " + num(st.totalXp()) + " XP", pal.accent);
+            });
+        }
+        if (st.pollHatch()) {
+            enqueue(() -> {
+                Sfx.levelUp(st, this);
+                PetView pv = new PetView(this);
+                pv.configure(st.petType(), st.level(), false, 1f, 3, false, "");
+                pv.setLayoutParams(ui.lpm(ui.dp(170), ui.dp(170), 0, 8, 0, 0));
+                celebrate(t("It hatched!", "ডিম ফুটেছে!"), pv, st.petName() + t(" is here 🐣", " এসে গেছে 🐣"),
+                        t("Keep studying and it will keep growing.", "পড়তে থাকো, ও বড় হতে থাকবে।"), null, 0);
             });
         }
         for (final Store.Reward r : st.pollRewardUnlocks()) {
@@ -213,6 +223,27 @@ public class MainActivity extends TabsB {
         c1.addView(tr);
         col.addView(c1);
 
+        // pet
+        col.addView(section(t("Your pet", "তোমার পেট")));
+        LinearLayout cp = ui.card();
+        PetView prev = makePet(false, false);
+        prev.setLayoutParams(ui.lpm(Ui.M, ui.dp(150), 0, 0, 0, 0));
+        cp.addView(prev);
+        LinearLayout pr = ui.hbox();
+        pr.setGravity(Gravity.CENTER);
+        String[] pn = {"🦊 " + t("Fox", "শেয়াল"), "🐼 " + t("Panda", "পান্ডা"), "🐱 " + t("Cat", "বিড়াল"), "🐰 " + t("Bunny", "খরগোশ")};
+        for (int i = 0; i < 4; i++) {
+            final int idx = i;
+            pr.addView(ui.chip(pn[i], st.petType() == i, v -> { st.setPetType(idx); rebuild(); }), ui.lpm(Ui.W, Ui.W, 3, 0, 3, 0));
+        }
+        cp.addView(ui.hscroll(pr), ui.lpm(Ui.M, Ui.W, 0, 8, 0, 0));
+        cp.addView(actionRow(t("Pet name", "পেটের নাম"), st.petName() + t("  ·  tap to rename", "  ·  নাম বদলাতে ট্যাপ করো"), pal.text, v ->
+                promptText(t("Name your pet", "পেটের নাম দাও"), t("Name", "নাম"), st.petName(), InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS,
+                        s -> { st.setPetName(s); afterChange(); })));
+        cp.addView(ui.tv(t("It hatches at " + Store.HATCH_XP + " XP and grows with every level: leaf, scarf, glasses, glow, crown. Tap it to play!",
+                "ও " + Store.HATCH_XP + " XP তে ডিম থেকে বের হয় আর প্রতি লেভেলে বড় হয়: পাতা, স্কার্ফ, চশমা, আলো, মুকুট। খেলতে ট্যাপ করো!"), 12, pal.dim));
+        col.addView(cp);
+
         // feedback
         col.addView(section(t("Sound & feel", "সাউন্ড ও ফিল")));
         LinearLayout c2 = ui.card();
@@ -228,7 +259,7 @@ public class MainActivity extends TabsB {
         c3.addView(divider());
         boolean ua = st.hasUsageAccess();
         c3.addView(actionRow(t("Usage access", "Usage access"), ua ? t("Allowed ✓ — also powers auto-penalty", "অনুমতি আছে ✓ — অটো-পেনাল্টিও এতে চলে")
-                : t("Not allowed — tap to open Android settings", "অনুমতি নেই — Android সেটিংস খুলতে ট্যাপ করো"), ua ? pal.accent : pal.gold, v -> openUsageSettings()));
+                : t("Not allowed — tap to open Android settings", "অনুমতি নেই — Android সেটিংস খুলতে ট্যাপ করো"), ua ? pal.accent : pal.gold, v -> usageGuide()));
         col.addView(c3);
 
         // fix XP
@@ -246,11 +277,11 @@ public class MainActivity extends TabsB {
             c4.addView(ui.tv(sb.toString().trim(), 12, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 0, 0, 6));
         }
         c4.addView(divider());
-        c4.addView(actionRow(t("Reset today", "আজ রিসেট"), t("Clears today's XP, sessions and penalties", "আজকের XP, সেশন ও পেনাল্টি মুছে ফেলে"), pal.text, v ->
-                confirm(t("Reset today?", "আজ রিসেট করবে?"), t("Today's XP and sessions are removed from your total.", "আজকের XP ও সেশন মোট থেকে বাদ যাবে।"), t("Reset", "রিসেট"), true, () -> {
+        c4.addView(actionRow(t("Reset today", "আজ রিসেট"), t("Removes everything from today: focus, bonuses, penalties, ticked tasks, XP edits, streak credit", "আজকের সব মুছে ফেলে: ফোকাস, বোনাস, পেনাল্টি, টাস্ক টিক, XP এডিট, স্ট্রিক"), pal.text, v ->
+                confirm(t("Reset today?", "আজ রিসেট করবে?"), t("Everything you earned or lost today is taken off your total XP. Other days stay.", "আজ যা অর্জন বা হারিয়েছ সব মোট XP থেকে বাদ যাবে। অন্য দিন ঠিক থাকবে।"), t("Reset", "রিসেট"), true, () -> {
                     FocusService.stop(this);
-                    st.resetToday();
-                    snack(t("Today was reset", "আজ রিসেট হয়েছে"));
+                    int removed = st.resetToday();
+                    snack(t("Today reset · total XP −" + removed, "আজ রিসেট · মোট XP −" + removed));
                     afterChange();
                 })));
         c4.addView(divider());
@@ -283,10 +314,30 @@ public class MainActivity extends TabsB {
         }));
         col.addView(c5);
 
+        // privacy
+        col.addView(section(t("Privacy & permissions", "প্রাইভেসি ও পারমিশন")));
+        LinearLayout cv = ui.card();
+        String[][] pv = {
+                {"🚫", t("No internet permission. The app physically cannot send anything out of your phone.", "ইন্টারনেট পারমিশন নেই। অ্যাপ ফোনের বাইরে কিছু পাঠাতেই পারে না।")},
+                {"💾", t("All data stays on this phone. A backup file exists only when you export one.", "সব ডেটা এই ফোনেই থাকে। ব্যাকআপ ফাইল শুধু তুমি এক্সপোর্ট করলেই হয়।")},
+                {"📊", t("Usage access (optional): reads minutes spent on Instagram / Facebook / TikTok for Focus Guard and auto-penalty.", "Usage access (ঐচ্ছিক): Focus Guard ও অটো-পেনাল্টির জন্য Instagram / Facebook / TikTok এর মিনিট পড়ে।")},
+                {"🔔", t("Notifications: the live session timer and alerts.", "নোটিফিকেশন: লাইভ সেশন টাইমার ও অ্যালার্ট।")},
+                {"ℹ️", t("Android warns about every app installed outside the Play Store. That is about where the APK came from, not what it does.", "Play Store-এর বাইরে থেকে ইনস্টল করা যেকোনো অ্যাপ নিয়ে Android সতর্ক করে। এটা APK কোথা থেকে এসেছে তা নিয়ে, অ্যাপ কী করে তা নিয়ে নয়।")}};
+        for (int i = 0; i < pv.length; i++) {
+            if (i > 0) cv.addView(divider());
+            LinearLayout r = ui.hbox();
+            r.setPadding(0, ui.dp(10), 0, ui.dp(10));
+            r.addView(ui.tv(pv[i][0], 16, pal.text), ui.lpm(ui.dp(30), Ui.W, 0, 0, 0, 0));
+            TextView tx = ui.tv(pv[i][1], 13, pal.text);
+            r.addView(tx, new LinearLayout.LayoutParams(0, Ui.W, 1f));
+            cv.addView(r);
+        }
+        col.addView(cv);
+
         // about
         col.addView(section(t("About", "সম্পর্কে")));
         LinearLayout c6 = ui.card();
-        c6.addView(ui.tvM("istii_the_great  v3.0", 16, pal.text));
+        c6.addView(ui.tvM("istii_the_great  v3.1", 16, pal.text));
         c6.addView(ui.tv(t("100% free · works offline · no ads · no account. Everything stays on this phone.",
                 "১০০% ফ্রি · অফলাইনে চলে · বিজ্ঞাপন নেই · অ্যাকাউন্ট লাগে না। সবকিছু এই ফোনেই থাকে।"), 13, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 6, 0, 0));
         c6.addView(ui.tv(t("Widget: long-press your home screen → Widgets → istii_the_great.", "উইজেট: হোম স্ক্রিনে লং-প্রেস → Widgets → istii_the_great।"), 13, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 10, 0, 0));

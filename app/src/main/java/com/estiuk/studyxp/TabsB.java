@@ -10,13 +10,18 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.GregorianCalendar;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
 /** Plan, Stats and Rewards screens. */
 abstract class TabsB extends TabsA {
-    int rewTab = 0;
+    int rewTab = 0, statsTab = 0, calYear = -1, calMonth = 0;
+    String calSel = "";
 
     // ============================================================ PLAN
     void buildPlan(LinearLayout col) {
@@ -71,7 +76,7 @@ abstract class TabsB extends TabsA {
             r.addView(ui.tvM("+" + k.xp, 14, pal.gold));
             r.addView(smallBtn("✕", Color.TRANSPARENT, pal.dim, v -> confirm(t("Delete task?", "টাস্ক মুছবে?"), k.title,
                     t("Delete", "মুছো"), true, () -> {
-                        if (k.done) st.addBonus(-k.xp);
+                        if (k.done) { st.addBonus(-k.xp); st.unlogAct("T", k.title, k.xp); }
                         st.deleteTask(k.id);
                         afterChange();
                     })), ui.lpm(ui.dp(34), ui.dp(34), 6, 0, 0, 0));
@@ -185,6 +190,11 @@ abstract class TabsB extends TabsA {
     void buildStats(LinearLayout col) {
         pad(col);
         col.addView(header(t("Stats", "স্ট্যাটস"), t("Your progress at a glance.", "তোমার অগ্রগতি এক নজরে।")));
+        LinearLayout sw = ui.hbox();
+        sw.addView(ui.chip("📊 " + t("Overview", "ওভারভিউ"), statsTab == 0, v -> { statsTab = 0; rebuild(); }), ui.lpm(Ui.W, Ui.W, 0, 0, 8, 0));
+        sw.addView(ui.chip("📅 " + t("Calendar", "ক্যালেন্ডার"), statsTab == 1, v -> { statsTab = 1; rebuild(); }));
+        col.addView(sw, ui.lpm(Ui.M, Ui.W, 0, 0, 0, 4));
+        if (statsTab == 1) { buildCalendar(col); return; }
 
         tileRow(col, tile(num(st.totalXp()), t("Total XP", "মোট XP"), pal.accent), tile(dur(st.totalFocusMin()), t("Total focus", "মোট ফোকাস"), pal.text));
         tileRow(col, tile(String.valueOf(st.totalSessions()), t("Sessions", "সেশন"), pal.text), tile(st.bestStreak() + t(" days", " দিন"), t("Best streak", "সেরা স্ট্রিক"), pal.gold));
@@ -199,6 +209,15 @@ abstract class TabsB extends TabsA {
         cc.addView(chart, new LinearLayout.LayoutParams(Ui.M, ui.dp(190)));
         cc.addView(ui.tv(t("Gold line = " + Store.STUDY_DAY_XP + " XP study-day mark", "সোনালী লাইন = " + Store.STUDY_DAY_XP + " XP স্টাডি-ডে মার্ক"), 12, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 8, 0, 0));
         col.addView(cc);
+
+        col.addView(section(t("Last 30 days", "শেষ ৩০ দিন")));
+        LinearLayout tcard = ui.card();
+        TrendView trend = new TrendView(this);
+        int[] t30 = new int[30];
+        for (int i = 0; i < 30; i++) t30[i] = st.dayNetOffset(i - 29);
+        trend.setData(t30, new String[]{t("30 days ago", "৩০ দিন আগে"), t("15 days", "১৫ দিন"), t("today", "আজ")}, pal.accent, pal.track, pal.dim, pal.text, pal.gold);
+        tcard.addView(trend, new LinearLayout.LayoutParams(Ui.M, ui.dp(170)));
+        col.addView(tcard);
 
         // weekly report
         col.addView(section(t("Weekly report", "সাপ্তাহিক রিপোর্ট")));
@@ -273,6 +292,131 @@ abstract class TabsB extends TabsA {
             col.addView(rc);
             col.addView(ui.tv(t("Tap a session to delete it.", "মুছতে সেশনে ট্যাপ করো।"), 12, pal.dim), ui.lpm(Ui.W, Ui.W, 4, 8, 0, 0));
         }
+    }
+
+    // ---------------------------------------------------------------- calendar
+    private static final String[] MON_EN = {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
+    private static final String[] MON_BN = {"জানুয়ারি", "ফেব্রুয়ারি", "মার্চ", "এপ্রিল", "মে", "জুন", "জুলাই", "আগস্ট", "সেপ্টেম্বর", "অক্টোবর", "নভেম্বর", "ডিসেম্বর"};
+
+    private String key(int y, int m, int d) { return String.format(Locale.US, "%04d-%02d-%02d", y, m + 1, d); }
+
+    void buildCalendar(LinearLayout col) {
+        Calendar now = Calendar.getInstance();
+        final int ny = now.get(Calendar.YEAR), nm = now.get(Calendar.MONTH), nd = now.get(Calendar.DAY_OF_MONTH);
+        if (calYear < 0) { calYear = ny; calMonth = nm; calSel = st.date(); }
+        Calendar first = new GregorianCalendar(calYear, calMonth, 1);
+        int days = first.getActualMaximum(Calendar.DAY_OF_MONTH), firstDow = first.get(Calendar.DAY_OF_WEEK) - 1;
+        boolean isNow = calYear == ny && calMonth == nm;
+        boolean isFuture = calYear > ny || (calYear == ny && calMonth > nm);
+        int futureFrom = isFuture ? 1 : isNow ? nd + 1 : 99;
+
+        int[] nets = new int[days];
+        int active = 0, totalXp = 0, totalFocus = 0, bestDay = 0;
+        for (int dd = 1; dd <= days; dd++) {
+            if (dd >= futureFrom) continue;
+            int[] ds = st.dayStats(key(calYear, calMonth, dd));
+            nets[dd - 1] = ds[0] + ds[1] - ds[2];
+            totalXp += Math.max(0, nets[dd - 1]);
+            totalFocus += ds[0];
+            if (nets[dd - 1] >= Store.STUDY_DAY_XP) active++;
+            bestDay = Math.max(bestDay, nets[dd - 1]);
+        }
+
+        LinearLayout cc = ui.card();
+        LinearLayout nav = ui.hbox();
+        nav.addView(smallBtn("‹", pal.surface2, pal.text, v -> {
+            calMonth--;
+            if (calMonth < 0) { calMonth = 11; calYear--; }
+            calSel = key(calYear, calMonth, 1);
+            rebuild();
+        }), new LinearLayout.LayoutParams(ui.dp(40), ui.dp(40)));
+        TextView title = ui.tvM((Lang.bn ? MON_BN : MON_EN)[calMonth] + " " + calYear, 18, pal.text);
+        title.setGravity(Gravity.CENTER);
+        nav.addView(title, new LinearLayout.LayoutParams(0, Ui.W, 1f));
+        nav.addView(smallBtn("›", isNow || isFuture ? pal.track : pal.surface2, isNow || isFuture ? pal.dim : pal.text, v -> {
+            if (calYear == ny && calMonth == nm) return;
+            calMonth++;
+            if (calMonth > 11) { calMonth = 0; calYear++; }
+            calSel = (calYear == ny && calMonth == nm) ? st.date() : key(calYear, calMonth, 1);
+            rebuild();
+        }), new LinearLayout.LayoutParams(ui.dp(40), ui.dp(40)));
+        cc.addView(nav);
+
+        String[] heads = Lang.bn ? new String[]{"র", "সো", "ম", "বু", "বৃ", "শু", "শ"} : new String[]{"S", "M", "T", "W", "T", "F", "S"};
+        CalendarView cal = new CalendarView(this);
+        int selDay = calSel.startsWith(key(calYear, calMonth, 1).substring(0, 8)) ? parseInt(calSel.substring(8), -1) : -1;
+        cal.setData(heads, days, firstDow, nets, selDay, isNow ? nd : -1, futureFrom, pal.track, pal.accent, pal.gold, pal.text, pal.dim, pal.onAccent,
+                day -> { calSel = key(calYear, calMonth, day); rebuild(); });
+        cc.addView(cal, ui.lpm(Ui.M, Ui.W, 0, 10, 0, 0));
+
+        LinearLayout lg = ui.hbox();
+        lg.setGravity(Gravity.CENTER);
+        lg.addView(ui.tv(t("less", "কম"), 11, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 0, 6, 0));
+        int[][] lv = {{pal.track, 100}, {pal.accent, 70}, {pal.accent, 130}, {pal.accent, 205}, {pal.gold, 235}};
+        for (int[] l : lv) {
+            View sq = new View(this);
+            sq.setBackground(ui.shape(Ui.alpha(l[0], l[1]), 4));
+            lg.addView(sq, ui.lpm(ui.dp(16), ui.dp(16), 2, 0, 2, 0));
+        }
+        lg.addView(ui.tv(t("more", "বেশি"), 11, pal.dim), ui.lpm(Ui.W, Ui.W, 6, 0, 0, 0));
+        cc.addView(lg, ui.lpm(Ui.M, Ui.W, 0, 12, 0, 0));
+        col.addView(cc, ui.lpm(Ui.M, Ui.W, 0, 10, 0, 0));
+
+        tileRow(col, tile(active + t(" days", " দিন"), t("Study days (20+ XP)", "স্টাডি ডে (২০+ XP)"), pal.accent), tile(num(totalXp) + " XP", t("Earned this month", "এই মাসে অর্জন"), pal.gold));
+        tileRow(col, tile(dur(totalFocus), t("Focus this month", "এই মাসের ফোকাস"), pal.text), tile(bestDay + " XP", t("Best day", "সেরা দিন"), pal.accent));
+
+        // selected day
+        final String k = calSel;
+        int[] ds = st.dayStats(k);
+        int netDay = ds[0] + ds[1] - ds[2];
+        String pretty = k;
+        try {
+            Date dt = new SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(k);
+            pretty = new SimpleDateFormat("EEEE, d MMM yyyy", Locale.US).format(dt);
+        } catch (Exception ignored) { }
+        col.addView(section(t("Day details", "দিনের বিবরণ")));
+        LinearLayout dc = ui.card();
+        dc.addView(ui.tvM(pretty, 17, pal.text));
+        dc.addView(ui.tv(dayLabel(k).equals(k) ? "" : dayLabel(k), 12, pal.accent));
+        LinearLayout mini = new LinearLayout(this);
+        mini.addView(miniStat(t("Focus", "ফোকাস"), dur(ds[0]), pal.text), ui.lpm(0, Ui.W, 0, 0, 4, 0));
+        mini.addView(miniStat(t("Bonus", "বোনাস"), "+" + ds[1], pal.gold), ui.lpm(0, Ui.W, 4, 0, 4, 0));
+        mini.addView(miniStat(t("Penalty", "পেনাল্টি"), "−" + ds[2], pal.danger), ui.lpm(0, Ui.W, 4, 0, 4, 0));
+        mini.addView(miniStat(t("Net", "নেট"), (netDay >= 0 ? "+" : "") + netDay, pal.accent), ui.lpm(0, Ui.W, 4, 0, 0, 0));
+        for (int i = 0; i < 4; i++) weight(mini.getChildAt(i));
+        dc.addView(mini, ui.lpm(Ui.M, Ui.W, 0, 12, 0, 0));
+
+        List<String[]> ses = st.sessionsOn(k), acts = st.actsOn(k);
+        if (ses.isEmpty() && acts.isEmpty()) {
+            dc.addView(ui.tv(netDay != 0 ? t("Only the totals were saved for this day.", "এই দিনের শুধু মোট হিসাব সেভ আছে।") : t("Nothing logged on this day.", "এই দিনে কিছু লগ হয়নি।"), 13, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 14, 0, 0));
+        } else {
+            dc.addView(ui.caps(t("What you did", "কী করেছ"), pal.dim), ui.lpm(Ui.W, Ui.W, 0, 16, 0, 4));
+            for (String[] s2 : ses) dc.addView(dayLine("⏱", (s2[2].isEmpty() ? t("Focus", "ফোকাস") : s2[2]) + " · " + dur(parseInt(s2[1], 0)) + " · " + s2[0], "+" + s2[1], pal.accent));
+            for (String[] a : acts) {
+                boolean b = a[0].equals("B"), tk = a[0].equals("T");
+                dc.addView(dayLine(b ? "✨" : tk ? "✅" : "⚠️", a[1], (b || tk ? "+" : "−") + a[2], b || tk ? pal.gold : pal.danger));
+            }
+        }
+        col.addView(dc);
+    }
+
+    View miniStat(String label, String value, int color) {
+        LinearLayout c = ui.vbox();
+        c.setPadding(ui.dp(10), ui.dp(10), ui.dp(10), ui.dp(10));
+        c.setBackground(ui.shape(pal.surface2, 12));
+        c.addView(ui.tvM(value, 15, color));
+        c.addView(ui.tv(label, 11, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 3, 0, 0));
+        return c;
+    }
+
+    View dayLine(String icon, String text, String xp, int color) {
+        LinearLayout r = ui.hbox();
+        r.setPadding(0, ui.dp(7), 0, ui.dp(7));
+        r.addView(ui.tv(icon, 15, pal.text), ui.lpm(ui.dp(26), Ui.W, 0, 0, 0, 0));
+        TextView t1 = ui.tv(text, 14, pal.text);
+        r.addView(t1, new LinearLayout.LayoutParams(0, Ui.W, 1f));
+        r.addView(ui.tvM(xp, 14, color), ui.lpm(Ui.W, Ui.W, 8, 0, 0, 0));
+        return r;
     }
 
     View reportRow(String label, String value, String change, boolean up) {

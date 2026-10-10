@@ -3,6 +3,7 @@ package com.estiuk.studyxp;
 import android.app.Dialog;
 import android.content.Intent;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.provider.Settings;
 import android.text.InputType;
 import android.view.Gravity;
@@ -69,6 +70,67 @@ abstract class TabsA extends BaseActivity {
         if (day.equals(st.date())) return t("Today", "আজ");
         if (day.equals(st.dayOffset(-1))) return t("Yesterday", "গতকাল");
         return day;
+    }
+
+    void openAppInfo() {
+        try {
+            startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName())));
+        } catch (Throwable e) {
+            snack(t("Open Settings → Apps → istii_the_great", "Settings → Apps → istii_the_great খোলো"));
+        }
+    }
+
+    void usageGuide() {
+        LinearLayout d = ui.dialogCard();
+        d.addView(ui.tvM(t("Allow usage access", "Usage access দাও"), 20, pal.text));
+        d.addView(ui.tv(t("Safe & private: this app has no internet permission at all, so nothing can ever leave your phone. It only reads how many minutes you spent on Instagram / Facebook / TikTok.",
+                "নিরাপদ ও প্রাইভেট: এই অ্যাপের ইন্টারনেট পারমিশনই নেই, তাই কিছুই ফোনের বাইরে যেতে পারে না। শুধু Instagram / Facebook / TikTok এ কত মিনিট কাটিয়েছ সেটা পড়ে।"),
+                13, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 8, 0, 0));
+        d.addView(ui.tvM(t("1.  Tap “Open usage access” and switch istii_the_great ON.",
+                "১.  “Open usage access” চেপে istii_the_great ON করো।"), 14, pal.text), ui.lpm(Ui.W, Ui.W, 0, 14, 0, 0));
+        d.addView(ui.tvM(t("2.  Switch greyed out? Android blocks special permissions for apps installed outside the Play Store. Tap “App info”, then ⋮ (top-right) → “Allow restricted settings”, then repeat step 1.",
+                "২.  সুইচ ধূসর? Play Store-এর বাইরে থেকে ইনস্টল করা অ্যাপের স্পেশাল পারমিশন Android আটকে রাখে। “App info” চেপে ⋮ (উপরে ডানে) → “Allow restricted settings” দাও, তারপর আবার ১ নম্বর করো।"),
+                14, pal.text), ui.lpm(Ui.W, Ui.W, 0, 10, 0, 0));
+        final Dialog dlg = ui.dialog(d);
+        LinearLayout btns = ui.hbox();
+        btns.addView(ui.button(t("App info", "App info"), false, v -> { dlg.dismiss(); openAppInfo(); }), ui.lpm(0, Ui.W, 0, 0, 6, 0));
+        btns.addView(ui.button(t("Open usage access", "Open usage access"), true, v -> { dlg.dismiss(); openUsageSettings(); }), ui.lpm(0, Ui.W, 6, 0, 0, 0));
+        weight(btns.getChildAt(0));
+        weight(btns.getChildAt(1));
+        d.addView(btns, ui.lpm(Ui.M, Ui.W, 0, 18, 0, 0));
+        dlg.show();
+    }
+
+    // ============================================================ pet
+    String petLine() {
+        if (!st.hatched()) return t("Study a little and I'll hatch! 🥚", "একটু পড়ো, আমি ডিম থেকে বেরোব! 🥚");
+        switch (st.petMood()) {
+            case 0: return t("Wake me up with a focus session 💤", "ফোকাস সেশন দিয়ে আমাকে জাগাও 💤");
+            case 1: return t("Nice start! Keep going 🌱", "শুরুটা ভালো! চালিয়ে যাও 🌱");
+            case 2: return t("Over halfway there! 🔥", "অর্ধেকের বেশি হয়ে গেছে! 🔥");
+            default: return t("Goal done! So proud of you ⭐", "লক্ষ্য পূরণ! গর্বিত তোমাকে নিয়ে ⭐");
+        }
+    }
+
+    private int cheerIdx = 0;
+
+    String petCheer() {
+        String[] en = {"You've got this! 💪", "One more minute? 😄", "I believe in you 🌟", "Water break? 💧", "Tiny steps count 🐾", "Study buddy ready! 📚"};
+        String[] bn = {"তুমি পারবে! 💪", "আরেকটা মিনিট? 😄", "আমি তোমার ওপর বিশ্বাস রাখি 🌟", "একটু পানি খাবে? 💧", "ছোট ছোট পদক্ষেপও দামি 🐾", "পড়ার সাথী রেডি! 📚"};
+        cheerIdx = (cheerIdx + 1) % en.length;
+        return t(en[cheerIdx], bn[cheerIdx]);
+    }
+
+    PetView makePet(final boolean focusing, final boolean bubble) {
+        final PetView pv = new PetView(this);
+        pv.setBubbleColors(pal.surface, pal.text);
+        pv.configure(st.petType(), st.level(), !st.hatched(), Math.min(1f, st.totalXp() / (float) Store.HATCH_XP), st.petMood(), focusing,
+                bubble ? petLine() : "");
+        pv.setOnPetTap(() -> {
+            Sfx.tap(st, this);
+            if (bubble) pv.setSay(st.hatched() ? petCheer() : t("Keep studying, I'm almost out! 🐣", "পড়তে থাকো, আমি প্রায় বেরিয়ে এসেছি! 🐣"));
+        });
+        return pv;
     }
 
     // ============================================================ dialogs shared by several tabs
@@ -158,10 +220,16 @@ abstract class TabsA extends BaseActivity {
         fv.setScene(pal.dark, pal.bg);
         hero.addView(fv, new FrameLayout.LayoutParams(Ui.M, Ui.M));
         LinearLayout ov = ui.vbox();
-        ov.setPadding(ui.dp(20), ui.dp(18), ui.dp(64), 0);
+        ov.setPadding(ui.dp(20), ui.dp(18), ui.dp(150), 0);
         ov.addView(ui.caps("istii_the_great", pal.accent));
         ov.addView(ui.tvM(greet + ",", 15, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 12, 0, 0));
-        ov.addView(ui.tvM(st.name(), 28, pal.text), ui.lpm(Ui.W, Ui.W, 0, 2, 0, 0));
+        TextView nameTv = ui.tvM(st.name(), 28, pal.text);
+        nameTv.setSingleLine(true);
+        nameTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        ov.addView(nameTv, ui.lpm(Ui.M, Ui.W, 0, 2, 0, 0));
+        ov.addView(ui.tvM("🐾 " + st.petName() + " · " + (st.hatched() ? Store.stageName(lv) : t("Egg", "ডিম")), 12.5f, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 8, 0, 0));
+        PetView pet = makePet(false, true);
+        hero.addView(pet, new FrameLayout.LayoutParams(ui.dp(165), ui.dp(165), Gravity.BOTTOM | Gravity.END));
         hero.addView(ov, new FrameLayout.LayoutParams(Ui.M, Ui.W));
         TextView gear = ui.tvM("⚙", 20, pal.text);
         gear.setGravity(Gravity.CENTER);
@@ -171,7 +239,7 @@ abstract class TabsA extends BaseActivity {
         FrameLayout.LayoutParams gp = new FrameLayout.LayoutParams(ui.dp(42), ui.dp(42), Gravity.TOP | Gravity.END);
         gp.setMargins(0, ui.dp(14), ui.dp(14), 0);
         hero.addView(gear, gp);
-        col.addView(hero, new LinearLayout.LayoutParams(Ui.M, ui.dp(180)));
+        col.addView(hero, new LinearLayout.LayoutParams(Ui.M, ui.dp(225)));
 
         // level card
         LinearLayout lc = ui.card();
@@ -334,6 +402,14 @@ abstract class TabsA extends BaseActivity {
                 String lab = g == 0 ? t("Free", "ফ্রি") : g + t("m", " মি.");
                 gr.addView(ui.chip(lab, selGoal == g, v -> { selGoal = g; rebuild(); }), ui.lpm(Ui.W, Ui.W, 0, 0, 8, 0));
             }
+            boolean presetGoal = false;
+            for (int g : goals) if (g == selGoal) presetGoal = true;
+            gr.addView(ui.chip(presetGoal ? t("Custom", "কাস্টম") : selGoal + t("m", " মি.") + " ✎", !presetGoal,
+                    v -> promptText(t("Custom focus goal", "নিজের ফোকাস লক্ষ্য"), t("Minutes (1–600)", "মিনিট (১–৬০০)"),
+                            selGoal > 0 ? String.valueOf(selGoal) : "", InputType.TYPE_CLASS_NUMBER, s -> {
+                                int m = parseInt(s, 0);
+                                if (m >= 1) { selGoal = Math.min(600, m); rebuild(); }
+                            })));
             col.addView(ui.hscroll(gr));
         } else {
             col.addView(section(t("Pomodoro (work / break)", "পোমোডোরো (কাজ / বিরতি)")));
@@ -370,7 +446,7 @@ abstract class TabsA extends BaseActivity {
             gc.addView(ui.tvM("🛡 " + t("Focus Guard is off", "Focus Guard বন্ধ"), 16, pal.text));
             gc.addView(ui.tv(t("Allow usage access and you'll get an alert when you open Instagram, Facebook, TikTok, YouTube… during a session.",
                     "Usage access দিলে সেশনের সময় Instagram, Facebook, TikTok, YouTube… খুললে অ্যালার্ট পাবে।"), 13, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 6, 0, 12));
-            gc.addView(ui.button(t("Allow usage access", "Usage access দাও"), false, v -> openUsageSettings()));
+            gc.addView(ui.button(t("Allow usage access", "Usage access দাও"), false, v -> usageGuide()));
             col.addView(gc, ui.lpm(Ui.M, Ui.W, 0, 18, 0, 0));
         }
 
@@ -424,8 +500,12 @@ abstract class TabsA extends BaseActivity {
     private void buildLive(LinearLayout col) {
         final boolean pomo = st.sessionMode() == 1;
         final boolean running = st.sessionRunning();
-        col.addView(header(pomo ? "🍅 Pomodoro" : t("Focus", "ফোকাস"),
-                st.sessionSubject().isEmpty() ? t("Deep work in progress", "ডিপ ওয়ার্ক চলছে") : st.sessionSubject()));
+        LinearLayout hrow = ui.hbox();
+        View hd = header(pomo ? "🍅 Pomodoro" : t("Focus", "ফোকাস"),
+                st.sessionSubject().isEmpty() ? t("Deep work in progress", "ডিপ ওয়ার্ক চলছে") : st.sessionSubject());
+        hrow.addView(hd, new LinearLayout.LayoutParams(0, Ui.W, 1f));
+        hrow.addView(makePet(true, false), new LinearLayout.LayoutParams(ui.dp(112), ui.dp(112)));
+        col.addView(hrow, ui.lpm(Ui.M, Ui.W, 0, 0, 0, 0));
 
         liveRing = new RingView(this);
         liveRing.setTicks(true);
@@ -446,7 +526,8 @@ abstract class TabsA extends BaseActivity {
         btns.addView(ui.button(running ? t("⏸  Pause", "⏸  পজ") : t("▶  Resume", "▶  চালু করো"), false, v -> {
             Sfx.tap(st, this);
             if (st.sessionRunning()) st.sessionPause();
-            else { st.sessionResume(); FocusService.start(this); }
+            else st.sessionResume();
+            FocusService.start(this);
             rebuild();
         }), ui.lpm(0, Ui.W, 0, 0, 6, 0));
         btns.addView(ui.button(t("✓  Finish", "✓  শেষ"), true, v -> finishSession()), ui.lpm(0, Ui.W, 6, 0, 0, 0));
@@ -552,56 +633,58 @@ abstract class TabsA extends BaseActivity {
         pad(col);
         col.addView(header(t("Boost", "বুস্ট"), t("Bonus XP for real learning. Penalties for lost time.", "আসল শেখার জন্য বোনাস XP। নষ্ট সময়ের জন্য পেনাল্টি।")));
 
-        col.addView(section(t("Bonus XP", "বোনাস XP")));
+        LinearLayout bh = ui.hbox();
+        bh.addView(section(t("Bonus XP", "বোনাস XP")), new LinearLayout.LayoutParams(0, Ui.W, 1f));
+        bh.addView(ui.chip("+ " + t("New", "নতুন"), true, v -> bonusDialog(null)));
+        col.addView(bh);
         LinearLayout bc = ui.card();
-        for (int i = 0; i < Store.BONUS_VALS.length; i++) {
+        List<Store.Bonus> bl = st.bonuses();
+        if (bl.isEmpty()) bc.addView(ui.tv(t("No bonus items. Tap “+ New” to create your own.", "কোনো বোনাস আইটেম নেই। নিজের বানাতে “+ নতুন” চাপো।"), 14, pal.dim));
+        for (int i = 0; i < bl.size(); i++) {
             if (i > 0) bc.addView(divider());
-            final int x = Store.BONUS_VALS[i];
+            final Store.Bonus bn = bl.get(i);
             LinearLayout r = ui.hbox();
             r.setPadding(0, ui.dp(10), 0, ui.dp(10));
-            TextView title = ui.tv(t(Store.BONUS_EN[i], Store.BONUS_BN[i]), 14, pal.text);
+            TextView title = ui.tv(Store.bonusName(bn), 14, pal.text);
+            title.setClickable(true);
+            title.setOnClickListener(v -> bonusDialog(bn));
             r.addView(title, new LinearLayout.LayoutParams(0, Ui.W, 1f));
-            r.addView(ui.tvM("+" + x, 14, pal.gold), ui.lpm(Ui.W, Ui.W, 8, 0, 10, 0));
+            r.addView(ui.tvM("+" + bn.xp, 14, pal.gold), ui.lpm(Ui.W, Ui.W, 8, 0, 10, 0));
             r.addView(smallBtn("−", pal.surface2, pal.dim, v -> {
-                if (st.bonus() >= x) { Sfx.tap(st, this); st.addBonus(-x); snack("−" + x + " XP"); afterChange(); }
-                else snack(t("No bonus to remove today", "আজ সরানোর মতো বোনাস নেই"));
+                if (st.undoBonus(bn)) { Sfx.tap(st, this); snack("−" + bn.xp + " XP"); afterChange(); }
+                else snack(t("Nothing to remove for this one today", "আজ এটার সরানোর মতো কিছু নেই"));
             }), new LinearLayout.LayoutParams(ui.dp(36), ui.dp(36)));
             r.addView(smallBtn("+", pal.accent, pal.onAccent, v -> {
                 Sfx.success(st, this);
-                st.addBonus(x);
-                snack("+" + x + " XP");
+                st.useBonus(bn);
+                snack("+" + bn.xp + " XP");
                 afterChange();
             }), ui.lpm(ui.dp(36), ui.dp(36), 8, 0, 0, 0));
             bc.addView(r);
         }
         col.addView(bc);
-        col.addView(ui.tv(t("Bonus today: +", "আজকের বোনাস: +") + st.bonus() + " XP", 13, pal.dim), ui.lpm(Ui.W, Ui.W, 4, 8, 0, 0));
+        col.addView(ui.tv(t("Tap a name to edit or delete it. Bonus today: +", "নাম ট্যাপ করলে এডিট/ডিলিট করা যাবে। আজকের বোনাস: +") + st.bonus() + " XP", 12, pal.dim),
+                ui.lpm(Ui.W, Ui.W, 4, 8, 0, 0));
 
         col.addView(section(t("Lost time (penalty)", "নষ্ট সময় (পেনাল্টি)")));
         LinearLayout pc = ui.card();
         pc.addView(ui.tv(t("Wasted minutes on distractions. 1 min = −1 XP.", "distraction এ নষ্ট মিনিট। ১ মিনিট = −১ XP।"), 13, pal.dim));
         LinearLayout add = ui.hbox();
-        int[] pv = {5, 10, 15, 30};
+        int[] pv = {3, 5, 10, 15, 30};
         for (final int m : pv) {
-            add.addView(ui.chipColor("−" + m, false, pal.danger, v -> {
-                Sfx.warn(st, this);
-                st.addPenalty(m);
-                snack("−" + m + " XP");
-                afterChange();
-            }), ui.lpm(Ui.W, Ui.W, 0, 0, 8, 0));
+            add.addView(ui.chipColor("−" + m, false, pal.danger, v -> applyPenalty(m)), ui.lpm(Ui.W, Ui.W, 0, 0, 8, 0));
         }
+        add.addView(ui.chipColor("✎ " + t("Custom", "কাস্টম"), false, pal.danger, v -> promptText(t("Minutes wasted", "কত মিনিট নষ্ট"), t("Minutes", "মিনিট"), "",
+                InputType.TYPE_CLASS_NUMBER, s -> applyPenalty(parseInt(s, 0)))));
         pc.addView(ui.hscroll(add), ui.lpm(Ui.M, Ui.W, 0, 12, 0, 0));
         LinearLayout undo = ui.hbox();
         undo.addView(ui.tv(t("Undo:", "ফেরত:"), 13, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 0, 10, 0));
-        for (final int m : new int[]{5, 10}) {
-            undo.addView(ui.chip("+" + m, false, v -> {
-                if (st.penalty() <= 0) { snack(t("No penalty today", "আজ কোনো পেনাল্টি নেই")); return; }
-                Sfx.tap(st, this);
-                st.addPenalty(-m);
-                afterChange();
-            }), ui.lpm(Ui.W, Ui.W, 0, 0, 8, 0));
+        for (final int m : new int[]{3, 5, 10}) {
+            undo.addView(ui.chip("+" + m, false, v -> undoPenalty(m)), ui.lpm(Ui.W, Ui.W, 0, 0, 8, 0));
         }
-        pc.addView(undo, ui.lpm(Ui.M, Ui.W, 0, 10, 0, 0));
+        undo.addView(ui.chip("✎", false, v -> promptText(t("Give back minutes", "কত মিনিট ফেরত"), t("Minutes", "মিনিট"), "",
+                InputType.TYPE_CLASS_NUMBER, s -> undoPenalty(parseInt(s, 0)))));
+        pc.addView(ui.hscroll(undo), ui.lpm(Ui.M, Ui.W, 0, 10, 0, 0));
         pc.addView(ui.tv(t("Penalty today: −", "আজকের পেনাল্টি: −") + st.penalty() + " XP", 13, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 12, 0, 0));
         col.addView(pc);
 
@@ -616,9 +699,60 @@ abstract class TabsA extends BaseActivity {
             ac.addView(ui.tvM(t("Track social-media time automatically", "সোশ্যাল মিডিয়ার সময় নিজে নিজে ট্র্যাক"), 16, pal.text));
             ac.addView(ui.tv(t("Allow usage access and every minute on Instagram, Facebook or TikTok becomes −1 XP. It uses Android's own stats; nothing leaves your phone.",
                     "Usage access দিলে Instagram, Facebook বা TikTok এ প্রতি মিনিট −১ XP হবে। Android এর নিজস্ব হিসাব ব্যবহার হয়; কিছুই ফোনের বাইরে যায় না।"), 13, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 6, 0, 12));
-            ac.addView(ui.button(t("Allow usage access", "Usage access দাও"), true, v -> openUsageSettings()));
+            ac.addView(ui.button(t("Allow usage access", "Usage access দাও"), true, v -> usageGuide()));
         }
         col.addView(ac);
+    }
+
+    void applyPenalty(int m) {
+        if (m < 1) { snack(t("Enter minutes above 0", "০ এর বেশি মিনিট দাও")); return; }
+        m = Math.min(m, 600);
+        Sfx.warn(st, this);
+        st.usePenalty(m);
+        snack("−" + m + " XP");
+        afterChange();
+    }
+
+    void undoPenalty(int m) {
+        if (m < 1) return;
+        if (!st.undoPenalty(m)) { snack(t("No penalty today", "আজ কোনো পেনাল্টি নেই")); return; }
+        Sfx.tap(st, this);
+        afterChange();
+    }
+
+    void bonusDialog(final Store.Bonus edit) {
+        LinearLayout d = ui.dialogCard();
+        d.addView(ui.tvM(edit == null ? t("New bonus", "নতুন বোনাস") : t("Edit bonus", "বোনাস এডিট"), 20, pal.text));
+        final EditText n = ui.input(t("e.g. Watched a lecture", "যেমন: লেকচার দেখেছি"), edit == null ? "" : Store.bonusName(edit),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        final EditText x = ui.input(t("XP (1–500)", "XP (১–৫০০)"), edit == null ? "" : String.valueOf(edit.xp), InputType.TYPE_CLASS_NUMBER);
+        d.addView(n, ui.lpm(Ui.M, Ui.W, 0, 14, 0, 0));
+        d.addView(x, ui.lpm(Ui.M, Ui.W, 0, 10, 0, 0));
+        final Dialog dlg = ui.dialog(d);
+        LinearLayout btns = ui.hbox();
+        btns.addView(ui.button(t("Cancel", "বাতিল"), false, v -> dlg.dismiss()), ui.lpm(0, Ui.W, 0, 0, 6, 0));
+        btns.addView(ui.button(t("Save", "সেভ"), true, v -> {
+            String name = Store.clean(n.getText().toString());
+            int xp = parseInt(x.getText().toString(), 0);
+            if (name.isEmpty() || xp < 1) { snack(t("Enter a name and XP", "নাম আর XP দাও")); return; }
+            if (edit == null) st.addBonusItem(name, xp); else st.updateBonusItem(edit.id, name, xp);
+            dlg.dismiss();
+            afterChange();
+        }), ui.lpm(0, Ui.W, 6, 0, 0, 0));
+        weight(btns.getChildAt(0));
+        weight(btns.getChildAt(1));
+        d.addView(btns, ui.lpm(Ui.M, Ui.W, 0, 18, 0, 0));
+        if (edit != null) {
+            TextView del = ui.tvM(t("Delete this bonus", "এই বোনাস মুছো"), 14, pal.danger);
+            del.setGravity(Gravity.CENTER);
+            del.setPadding(0, ui.dp(14), 0, 0);
+            del.setOnClickListener(v -> {
+                dlg.dismiss();
+                confirm(t("Delete bonus?", "বোনাস মুছবে?"), Store.bonusName(edit), t("Delete", "মুছো"), true, () -> { st.deleteBonusItem(edit.id); afterChange(); });
+            });
+            d.addView(del, ui.lpm(Ui.M, Ui.W, 0, 4, 0, 0));
+        }
+        dlg.show();
     }
 
     static String time(long ms) { return new SimpleDateFormat("HH:mm", Locale.US).format(new Date(ms)); }

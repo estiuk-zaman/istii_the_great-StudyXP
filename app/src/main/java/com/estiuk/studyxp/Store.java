@@ -87,6 +87,186 @@ final class Store {
             }
         }
         if (!p.contains("subjects")) p.edit().putString("subjects", "General|0").apply();
+        if (!p.contains("bonusList")) {
+            try {
+                JSONArray a = new JSONArray();
+                for (int i = 0; i < BONUS_VALS.length; i++) {
+                    a.put(new JSONObject().put("id", "d" + i).put("n", "").put("x", BONUS_VALS[i]).put("d", i));
+                }
+                p.edit().putString("bonusList", a.toString()).apply();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    // ============================================================ custom bonus list
+    static final class Bonus {
+        String id, name;   // name empty => built-in, localised
+        int xp, def = -1;
+    }
+
+    List<Bonus> bonuses() {
+        List<Bonus> out = new ArrayList<>();
+        try {
+            JSONArray a = new JSONArray(p.getString("bonusList", "[]"));
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.getJSONObject(i);
+                Bonus b = new Bonus();
+                b.id = o.optString("id");
+                b.name = o.optString("n");
+                b.xp = o.optInt("x", 10);
+                b.def = o.optInt("d", -1);
+                out.add(b);
+            }
+        } catch (Exception ignored) {
+        }
+        return out;
+    }
+
+    static String bonusName(Bonus b) {
+        if (!b.name.isEmpty()) return b.name;
+        if (b.def >= 0 && b.def < BONUS_EN.length) return Lang.bn ? BONUS_BN[b.def] : BONUS_EN[b.def];
+        return "Bonus";
+    }
+
+    private void saveBonuses(List<Bonus> l) {
+        try {
+            JSONArray a = new JSONArray();
+            for (Bonus b : l) a.put(new JSONObject().put("id", b.id).put("n", b.name).put("x", b.xp).put("d", b.def));
+            p.edit().putString("bonusList", a.toString()).apply();
+        } catch (Exception ignored) {
+        }
+    }
+
+    void addBonusItem(String name, int xp) {
+        List<Bonus> l = bonuses();
+        Bonus b = new Bonus();
+        b.id = "b" + Long.toString(System.nanoTime(), 36);
+        b.name = clean(name);
+        b.xp = Math.max(1, Math.min(500, xp));
+        l.add(b);
+        saveBonuses(l);
+    }
+
+    void updateBonusItem(String id, String name, int xp) {
+        List<Bonus> l = bonuses();
+        for (Bonus b : l) if (b.id.equals(id)) { b.name = clean(name); b.xp = Math.max(1, Math.min(500, xp)); }
+        saveBonuses(l);
+    }
+
+    void deleteBonusItem(String id) {
+        List<Bonus> l = bonuses();
+        for (int i = 0; i < l.size(); i++) if (l.get(i).id.equals(id)) { l.remove(i); break; }
+        saveBonuses(l);
+    }
+
+    /** Applies a bonus and writes it to the day log. */
+    void useBonus(Bonus b) {
+        addBonus(b.xp);
+        logAct("B", bonusName(b), b.xp);
+    }
+
+    /** Takes one use of the bonus back. Returns false when today has no such bonus to remove. */
+    boolean undoBonus(Bonus b) {
+        if (bonus() < b.xp) return false;
+        addBonus(-b.xp);
+        unlogAct("B", bonusName(b), b.xp);
+        return true;
+    }
+
+    void usePenalty(int mins) {
+        addPenalty(mins);
+        logAct("P", Lang.bn ? "নষ্ট সময়" : "Wasted time", mins);
+    }
+
+    boolean undoPenalty(int mins) {
+        if (penalty() <= 0) return false;
+        int m = Math.min(mins, penalty());
+        addPenalty(-m);
+        unlogAct("P", null, mins);
+        return true;
+    }
+
+    // ============================================================ day activity log (bonuses / tasks / penalties)
+    /** Lines: day|K|xp|title   K = B bonus, T task, P penalty. */
+    void logAct(String kind, String title, int xp) {
+        String line = date() + "|" + kind + "|" + xp + "|" + clean(title);
+        String old = p.getString("alog", "");
+        String all = old.isEmpty() ? line : old + "\n" + line;
+        String[] ls = all.split("\n");
+        if (ls.length > 400) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = ls.length - 400; i < ls.length; i++) { if (sb.length() > 0) sb.append('\n'); sb.append(ls[i]); }
+            all = sb.toString();
+        }
+        p.edit().putString("alog", all).apply();
+    }
+
+    /** Removes the newest matching line of today. title == null matches any title; xp <= 0 matches any xp. */
+    void unlogAct(String kind, String title, int xp) {
+        String all = p.getString("alog", "");
+        if (all.isEmpty()) return;
+        String[] ls = all.split("\n");
+        String today = date();
+        int hit = -1;
+        for (int i = ls.length - 1; i >= 0 && hit < 0; i--) {
+            String[] a = ls[i].split("\\|", 4);
+            if (a.length < 4 || !a[0].equals(today) || !a[1].equals(kind)) continue;
+            if (title != null && !a[3].equals(clean(title))) continue;
+            if (xp > 0) { try { if (Integer.parseInt(a[2]) != xp) continue; } catch (Exception e) { continue; } }
+            hit = i;
+        }
+        if (hit < 0) return;
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < ls.length; i++) {
+            if (i == hit) continue;
+            if (sb.length() > 0) sb.append('\n');
+            sb.append(ls[i]);
+        }
+        p.edit().putString("alog", sb.toString()).apply();
+    }
+
+    /** Entries for a day, oldest first: {kind, title, xp}. */
+    List<String[]> actsOn(String day) {
+        List<String[]> out = new ArrayList<>();
+        String all = p.getString("alog", "");
+        if (all.isEmpty()) return out;
+        for (String line : all.split("\n")) {
+            String[] a = line.split("\\|", 4);
+            if (a.length == 4 && a[0].equals(day)) out.add(new String[]{a[1], a[3], a[2]});
+        }
+        return out;
+    }
+
+    /** Sessions logged on a day, oldest first: {time, minutes, subject}. */
+    List<String[]> sessionsOn(String day) {
+        List<String[]> out = new ArrayList<>();
+        for (String[] s : recentSessions(150)) if (s[0].equals(day)) out.add(0, new String[]{s[1], s[2], s[3]});
+        return out;
+    }
+
+    // ============================================================ pet
+    static final int HATCH_XP = 20;
+    int petType() { return p.getInt("petType", 0); }
+    void setPetType(int t) { p.edit().putInt("petType", Math.max(0, Math.min(3, t))).apply(); }
+    String petName() { return p.getString("petName", "Mochi"); }
+    void setPetName(String s) { p.edit().putString("petName", s.trim().isEmpty() ? "Mochi" : clean(s)).apply(); }
+    boolean hatched() { return totalXp() >= HATCH_XP; }
+
+    /** True once, the first time the pet has hatched. */
+    boolean pollHatch() {
+        if (hatched() && !p.getBoolean("hatchSeen", false)) {
+            p.edit().putBoolean("hatchSeen", true).apply();
+            return true;
+        }
+        return false;
+    }
+
+    /** 0 sleepy (nothing today), 1 warming up, 2 over half the goal, 3 goal reached. */
+    int petMood() {
+        if (focus() == 0 && bonus() == 0) return 0;
+        float f = focus() / (float) Math.max(1, goalMin());
+        return f >= 1f ? 3 : f >= 0.5f ? 2 : 1;
     }
 
     // ============================================================ dates
@@ -493,15 +673,18 @@ final class Store {
                 if (o.optString("id").equals(id)) {
                     boolean nowDone = !o.optBoolean("d");
                     int xp = o.optInt("x", 10);
+                    String ttl = o.optString("t");
                     o.put("d", nowDone).put("dd", nowDone ? date() : "");
                     p.edit().putString("tasks", a.toString()).apply();
                     if (nowDone) {
                         p.edit().putInt("totTasks", p.getInt("totTasks", 0) + 1).apply();
                         addBonus(xp);
+                        logAct("T", ttl, xp);
                         return xp;
                     }
                     p.edit().putInt("totTasks", Math.max(0, p.getInt("totTasks", 0) - 1)).apply();
                     addBonus(-xp);
+                    unlogAct("T", ttl, xp);
                     return -xp;
                 }
             }
@@ -889,12 +1072,16 @@ final class Store {
     void setPomo(int w, int b) { p.edit().putInt("pomoWork", w).putInt("pomoBreak", b).apply(); }
 
     // ============================================================ resets
-    void resetToday() {
+    /** Wipes everything that belongs to today (focus, bonus, penalty, tasks, manual XP edits, streak credit). Returns XP taken off the total. */
+    int resetToday() {
         String today = date();
+        int totalBefore = totalXp();
+        SharedPreferences.Editor e = p.edit();
+
+        // sessions
         String all = p.getString("sessions", "");
         StringBuilder keep = new StringBuilder();
         int removedSessions = 0;
-        SharedPreferences.Editor e = p.edit();
         if (!all.isEmpty()) {
             for (String line : all.split("\n")) {
                 String[] a = line.split("\\|", 4);
@@ -914,15 +1101,75 @@ final class Store {
         e.putString("sessions", keep.toString());
         e.putInt("totFocus", Math.max(0, p.getInt("totFocus", 0) - focus()));
         e.putInt("totSessions", Math.max(0, p.getInt("totSessions", 0) - removedSessions));
-        e.putInt("totalXp", Math.max(0, totalXp() - p.getInt("loggedNet", 0)));
+
+        // manual XP edits made today
+        int adjSum = 0;
+        String adj = p.getString("adj", "");
+        StringBuilder keepAdj = new StringBuilder();
+        if (!adj.isEmpty()) {
+            for (String line : adj.split("\n")) {
+                String[] a = line.split("\\|", 3);
+                if (a.length >= 2 && a[0].equals(today)) {
+                    try { adjSum += Integer.parseInt(a[1]); } catch (Exception ignored) { }
+                } else {
+                    if (keepAdj.length() > 0) keepAdj.append('\n');
+                    keepAdj.append(line);
+                }
+            }
+        }
+        e.putString("adj", keepAdj.toString());
+
+        // bonus / task / penalty log of today
+        String al = p.getString("alog", "");
+        StringBuilder keepLog = new StringBuilder();
+        if (!al.isEmpty()) {
+            for (String line : al.split("\n")) {
+                if (!line.startsWith(today + "|")) {
+                    if (keepLog.length() > 0) keepLog.append('\n');
+                    keepLog.append(line);
+                }
+            }
+        }
+        e.putString("alog", keepLog.toString());
+
+        // tasks: un-tick (they were ticked today, the bonus goes away with todayBonus)
+        try {
+            JSONArray ta = new JSONArray(p.getString("tasks", "[]"));
+            int unticked = 0;
+            for (int i = 0; i < ta.length(); i++) {
+                JSONObject o = ta.getJSONObject(i);
+                if (o.optBoolean("d")) { o.put("d", false).put("dd", ""); unticked++; }
+            }
+            e.putString("tasks", ta.toString());
+            e.putInt("totTasks", Math.max(0, p.getInt("totTasks", 0) - unticked));
+        } catch (Exception ignored) {
+        }
+
+        // streak credit earned today
+        if (today.equals(p.getString("lastStudyDay", ""))) {
+            int s = p.getInt("streak", 0);
+            if (s > 1) e.putString("lastStudyDay", dayOffset(-1)).putInt("streak", s - 1);
+            else e.remove("lastStudyDay").putInt("streak", 0);
+        }
+        e.remove("celebrated");
+
+        // total
+        int removeXp = p.getInt("loggedNet", 0) + adjSum;
+        e.putInt("totalXp", Math.max(0, totalXp() - removeXp));
+
+        // usage: don't charge minutes that were already used before the reset
+        long base = 0;
+        if (hasUsageAccess()) { int[] u = usageToday(); base = u[0] + u[1] + u[2]; }
+
         e.putInt("todayFocus", 0).putInt("todayBonus", 0).putInt("todayPenalty", 0).putInt("todayNet", 0).putInt("loggedNet", 0)
-                .putLong("usageBase", 0).putBoolean("sOpen", false).putBoolean("sRun", false).putLong("sAcc", 0);
-        e.apply();
+                .putLong("usageBase", base).putBoolean("sOpen", false).putBoolean("sRun", false).putLong("sAcc", 0);
+        e.commit();
+        return totalBefore - totalXp();
     }
 
     /** Wipes XP / history / streaks / badges but keeps settings, subjects and the reward list (un-claimed). */
     void resetProgress() {
-        String[] keepKeys = {"name", "bn", "dark", "sfx", "hap", "guard", "goalMin", "pomoWork", "pomoBreak", "subjects", "rewards", "lastGoal"};
+        String[] keepKeys = {"name", "bn", "dark", "sfx", "hap", "guard", "goalMin", "pomoWork", "pomoBreak", "subjects", "rewards", "lastGoal", "bonusList", "petType", "petName"};
         Map<String, Object> keep = new HashMap<>();
         Map<String, ?> all = p.getAll();
         for (String k : keepKeys) if (all.containsKey(k)) keep.put(k, all.get(k));
