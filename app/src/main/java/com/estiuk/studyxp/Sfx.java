@@ -16,8 +16,13 @@ final class Sfx {
         try {
             Vibrator v = (Vibrator) c.getSystemService(Context.VIBRATOR_SERVICE);
             if (v == null || !v.hasVibrator()) return;
-            if (pattern.length == 1) v.vibrate(VibrationEffect.createOneShot(pattern[0], VibrationEffect.DEFAULT_AMPLITUDE));
-            else v.vibrate(VibrationEffect.createWaveform(pattern, -1));
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                if (pattern.length == 1) v.vibrate(VibrationEffect.createOneShot(pattern[0], VibrationEffect.DEFAULT_AMPLITUDE));
+                else v.vibrate(VibrationEffect.createWaveform(pattern, -1));
+            } else {
+                if (pattern.length == 1) v.vibrate(pattern[0]);
+                else v.vibrate(pattern, -1);
+            }
         } catch (Throwable ignored) {
         }
     }

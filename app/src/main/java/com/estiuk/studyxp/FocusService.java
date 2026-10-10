@@ -36,7 +36,10 @@ public class FocusService extends Service {
     };
 
     static void start(Context c) {
-        try { c.startForegroundService(new Intent(c, FocusService.class)); } catch (Throwable t) { App.report(t); }
+        try {
+            Intent i = new Intent(c, FocusService.class);
+            if (Build.VERSION.SDK_INT >= 26) c.startForegroundService(i); else c.startService(i);
+        } catch (Throwable t) { App.report(t); }
     }
 
     static void stop(Context c) {
@@ -47,6 +50,7 @@ public class FocusService extends Service {
         super.onCreate();
         st = new Store(this);
         Lang.bn = st.bn();
+        if (Build.VERSION.SDK_INT < 26) return;
         try {
             NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             nm.createNotificationChannel(new NotificationChannel(CH_FOCUS, Lang.t("Focus session", "ফোকাস সেশন"), NotificationManager.IMPORTANCE_LOW));
@@ -78,9 +82,18 @@ public class FocusService extends Service {
 
     @Override public IBinder onBind(Intent intent) { return null; }
 
+    /** Notification.Builder that also works before Android 8 (no channels there). */
+    @SuppressWarnings("deprecation")
+    private Notification.Builder builder(String channel, boolean loud) {
+        if (Build.VERSION.SDK_INT >= 26) return new Notification.Builder(this, channel);
+        Notification.Builder b = new Notification.Builder(this);
+        b.setPriority(loud ? Notification.PRIORITY_HIGH : Notification.PRIORITY_LOW);
+        return b;
+    }
+
     private PendingIntent open() {
         Intent i = new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
-        return PendingIntent.getActivity(this, 0, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        return PendingIntent.getActivity(this, 0, i, (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0) | PendingIntent.FLAG_UPDATE_CURRENT);
     }
 
     private String clock(long s) {
@@ -93,7 +106,7 @@ public class FocusService extends Service {
         String subj = st.sessionSubject();
         String title = Lang.t("Focusing", "ফোকাস চলছে") + (subj.isEmpty() ? "" : " · " + subj);
         String text;
-        Notification.Builder b = new Notification.Builder(this, CH_FOCUS)
+        Notification.Builder b = builder(CH_FOCUS, false)
                 .setSmallIcon(R.drawable.ic_stat)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
@@ -110,7 +123,8 @@ public class FocusService extends Service {
             title = (br ? Lang.t("Break", "বিরতি") : "🍅 " + Lang.t("Pomodoro focus", "পোমোডোরো ফোকাস")) + (subj.isEmpty() || br ? "" : " · " + subj);
             text = br ? Lang.t("Relax - back to focus soon", "একটু জিরিয়ে নাও") : Lang.t("Stay with it, you're doing great", "চালিয়ে যাও, দারুণ হচ্ছে");
             // live countdown drawn by the system itself, so it never freezes
-            b.setShowWhen(true).setUsesChronometer(true).setChronometerCountDown(true).setWhen(now + ps[1] * 1000L);
+            if (Build.VERSION.SDK_INT >= 24) b.setShowWhen(true).setUsesChronometer(true).setChronometerCountDown(true).setWhen(now + ps[1] * 1000L);
+            else b.setShowWhen(true).setUsesChronometer(true).setWhen(now - (ps[2] - ps[1]) * 1000L);
         } else {
             int g = st.sessionGoal();
             text = g > 0 ? Lang.t("Goal: ", "লক্ষ্য: ") + g + Lang.t(" min", " মিনিট") : Lang.t("Free focus", "ফ্রি ফোকাস");
@@ -128,7 +142,7 @@ public class FocusService extends Service {
 
     private void alert(String title, String text, boolean sound) {
         try {
-            Notification n = new Notification.Builder(this, CH_ALERT)
+            Notification n = builder(CH_ALERT, true)
                     .setSmallIcon(R.drawable.ic_stat)
                     .setContentTitle(title)
                     .setContentText(text)

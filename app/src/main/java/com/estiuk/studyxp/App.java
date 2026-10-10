@@ -14,6 +14,7 @@ public class App extends Application {
     @Override public void onCreate() {
         super.onCreate();
         inst = this;
+        try { Brand.NAME = getString(R.string.app_name); } catch (Throwable ignored) { }
         final Thread.UncaughtExceptionHandler prev = Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
             report(e);

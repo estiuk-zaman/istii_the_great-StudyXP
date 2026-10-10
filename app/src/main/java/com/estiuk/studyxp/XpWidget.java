@@ -31,7 +31,7 @@ public class XpWidget extends AppWidgetProvider {
         rv.setProgressBar(R.id.w_bar, 100, Math.round(s.levelProgress() * 100), false);
         rv.setTextViewText(R.id.w_today, Lang.t("Today ", "আজ ") + Math.max(0, s.net()) + " / " + Store.STUDY_DAY_XP + " XP");
         Intent i = new Intent(c, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        rv.setOnClickPendingIntent(R.id.w_root, PendingIntent.getActivity(c, 0, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT));
+        rv.setOnClickPendingIntent(R.id.w_root, PendingIntent.getActivity(c, 0, i, (android.os.Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0) | PendingIntent.FLAG_UPDATE_CURRENT));
         return rv;
     }
 

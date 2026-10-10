@@ -79,12 +79,17 @@ final class Store {
         ctx = c.getApplicationContext();
         p = ctx.getSharedPreferences("studyxp", 0);
         if (!p.contains("rewards")) {
+            p.edit().putString("rewards", defaultRewards()).apply();
+        } else if (!p.getBoolean("rwMig", false)) {
+            // one-time: the old placeholder "Hair Dryer" reward (never claimed) is swapped for friendlier defaults
             try {
-                JSONArray a = new JSONArray();
-                a.put(new JSONObject().put("id", "r0").put("n", "Hair Dryer 🎁").put("x", 12000).put("c", false));
-                p.edit().putString("rewards", a.toString()).apply();
+                JSONArray a = new JSONArray(p.getString("rewards", "[]"));
+                if (a.length() == 1 && a.getJSONObject(0).optString("n").startsWith("Hair Dryer") && !a.getJSONObject(0).optBoolean("c")) {
+                    p.edit().putString("rewards", defaultRewards()).apply();
+                }
             } catch (Exception ignored) {
             }
+            p.edit().putBoolean("rwMig", true).apply();
         }
         if (!p.contains("subjects")) p.edit().putString("subjects", "General|0").apply();
         if (!p.contains("bonusList")) {
@@ -96,6 +101,18 @@ final class Store {
                 p.edit().putString("bonusList", a.toString()).apply();
             } catch (Exception ignored) {
             }
+        }
+    }
+
+    static String defaultRewards() {
+        try {
+            JSONArray a = new JSONArray();
+            String[] n = {"Favourite snack 🍫", "Movie night 🍿", "Gaming session 🎮", "Treat yourself 🍕"};
+            int[] x = {200, 600, 1500, 5000};
+            for (int i = 0; i < n.length; i++) a.put(new JSONObject().put("id", "r" + i).put("n", n[i]).put("x", x[i]).put("c", false));
+            return a.toString();
+        } catch (Exception e) {
+            return "[]";
         }
     }
 
@@ -247,10 +264,11 @@ final class Store {
 
     // ============================================================ pet
     static final int HATCH_XP = 20;
-    int petType() { return p.getInt("petType", 0); }
-    void setPetType(int t) { p.edit().putInt("petType", Math.max(0, Math.min(3, t))).apply(); }
-    String petName() { return p.getString("petName", "Mochi"); }
-    void setPetName(String s) { p.edit().putString("petName", s.trim().isEmpty() ? "Mochi" : clean(s)).apply(); }
+    /** 0 fox, 1 panda, 2 cat, 3 bunny, 4 Pexumi (the app mascot, default). */
+    int petType() { return p.getInt("petType", 4); }
+    void setPetType(int t) { p.edit().putInt("petType", Math.max(0, Math.min(4, t))).apply(); }
+    String petName() { return p.getString("petName", "Pexumi"); }
+    void setPetName(String s) { p.edit().putString("petName", s.trim().isEmpty() ? "Pexumi" : clean(s)).apply(); }
     boolean hatched() { return totalXp() >= HATCH_XP; }
 
     /** True once, the first time the pet has hatched. */
@@ -291,7 +309,7 @@ final class Store {
                 e.putString("h_" + saved, p.getInt("todayFocus", 0) + "," + p.getInt("todayBonus", 0) + "," + p.getInt("todayPenalty", 0));
             }
             e.putString("day", today).putInt("todayFocus", 0).putInt("todayBonus", 0).putInt("todayPenalty", 0)
-                    .putInt("todayNet", 0).putInt("loggedNet", 0).putLong("usageBase", 0).apply();
+                    .putInt("todayNet", 0).putInt("loggedNet", 0).putLong("usageBase", 0).putLong("usageOff", 0).apply();
             // drop tasks that were completed on an earlier day
             try {
                 JSONArray a = new JSONArray(p.getString("tasks", "[]")), out = new JSONArray();
@@ -384,6 +402,7 @@ final class Store {
             int s = p.getInt("streak", 0);
             s = last.equals(dayOffset(-1)) ? s + 1 : 1;
             p.edit().putString("lastStudyDay", d).putInt("streak", s)
+                    .putString("pbDay", d).putInt("pb", p.getInt("bestStreak", 0))
                     .putInt("bestStreak", Math.max(s, p.getInt("bestStreak", 0))).apply();
         }
     }
@@ -606,7 +625,7 @@ final class Store {
                 out.add(new String[]{e.getKey().substring(3), String.valueOf(e.getValue())});
             }
         }
-        out.sort((x, y) -> Integer.parseInt(y[1]) - Integer.parseInt(x[1]));
+        java.util.Collections.sort(out, (x, y) -> Integer.parseInt(y[1]) - Integer.parseInt(x[1]));
         return out;
     }
 
@@ -724,7 +743,7 @@ final class Store {
             }
         } catch (Exception ignored) {
         }
-        out.sort((x, y) -> x.xp - y.xp);
+        java.util.Collections.sort(out, (x, y) -> x.xp - y.xp);
         return out;
     }
 
@@ -846,26 +865,31 @@ final class Store {
         }
     }
 
+    /** Badges that are earned RIGHT NOW. They are always derived from the current data, so they disappear again if XP / hours / streak go down. */
     Set<String> unlockedBadges() {
+        Set<String> s = new HashSet<>();
+        for (int i = 0; i < BADGES.length; i++) if (badgeProgress(i) >= badgeTarget(i)) s.add(BADGES[i][0]);
+        return s;
+    }
+
+    private Set<String> celebratedBadges() {
         Set<String> s = new HashSet<>();
         String v = p.getString("badges", "");
         if (!v.isEmpty()) for (String x : v.split(",")) s.add(x);
         return s;
     }
 
-    /** Unlocks any newly earned badges and returns their indexes. */
+    /** Returns the badges earned since the last check (for the celebration) and drops the ones that are no longer earned. */
     List<Integer> checkBadges() {
         List<Integer> fresh = new ArrayList<>();
-        Set<String> have = unlockedBadges();
+        Set<String> now = unlockedBadges();
+        Set<String> seen = celebratedBadges();
         for (int i = 0; i < BADGES.length; i++) {
-            if (!have.contains(BADGES[i][0]) && badgeProgress(i) >= badgeTarget(i)) {
-                have.add(BADGES[i][0]);
-                fresh.add(i);
-            }
+            if (now.contains(BADGES[i][0]) && !seen.contains(BADGES[i][0])) fresh.add(i);
         }
-        if (!fresh.isEmpty()) {
+        if (!now.equals(seen)) {
             StringBuilder sb = new StringBuilder();
-            for (String x : have) { if (sb.length() > 0) sb.append(','); sb.append(x); }
+            for (String x : now) { if (sb.length() > 0) sb.append(','); sb.append(x); }
             p.edit().putString("badges", sb.toString()).apply();
         }
         return fresh;
@@ -939,11 +963,15 @@ final class Store {
         if (mins >= 1) {
             addFocus(mins, subj);
             SharedPreferences.Editor e = p.edit();
-            if (pomos > 0) e.putInt("totPomos", p.getInt("totPomos", 0) + pomos);
+            String td = date();
+            if (!td.equals(p.getString("tcDay", ""))) e.putString("tcDay", td).putInt("tcPomo", 0).putInt("tcClean", 0);
+            int tcPomo = td.equals(p.getString("tcDay", "")) ? p.getInt("tcPomo", 0) : 0;
+            int tcClean = td.equals(p.getString("tcDay", "")) ? p.getInt("tcClean", 0) : 0;
+            if (pomos > 0) e.putInt("totPomos", p.getInt("totPomos", 0) + pomos).putInt("tcPomo", tcPomo + pomos);
             int hr = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
             if (hr >= 22 || hr < 4) e.putBoolean("fNight", true);
             if (hr >= 4 && hr < 7) e.putBoolean("fEarly", true);
-            if (mins >= 25 && strikes == 0 && guard()) e.putInt("cleanSessions", p.getInt("cleanSessions", 0) + 1);
+            if (mins >= 25 && strikes == 0 && guard()) e.putInt("cleanSessions", p.getInt("cleanSessions", 0) + 1).putInt("tcClean", tcClean + 1);
             e.apply();
         }
         return mins;
@@ -1019,10 +1047,21 @@ final class Store {
     }
 
     int syncUsage() {
-        if (!hasUsageAccess()) return 0;
+        if (!hasUsageAccess()) {
+            if (p.getBoolean("usageArmed", false)) p.edit().putBoolean("usageArmed", false).apply();
+            return 0;
+        }
         int[] u = usageToday();
         long total = u[0] + u[1] + u[2];
         long base = p.getLong("usageBase", 0);
+        if (!p.getBoolean("usageArmed", false)) {
+            // First time Usage access is available: minutes used BEFORE this moment are not charged.
+            // Also takes back any penalty that an older version charged from the stale screen time.
+            p.edit().putBoolean("usageArmed", true).putLong("usageBase", total).putLong("usageOff", total)
+                    .putInt("todayPenalty", Math.max(0, penalty() - (int) base)).apply();
+            sync();
+            return 0;
+        }
         if (total > base) {
             int delta = (int) (total - base);
             p.edit().putLong("usageBase", total).putInt("todayPenalty", penalty() + delta).apply();
@@ -1032,7 +1071,10 @@ final class Store {
         return 0;
     }
 
-    int autoPenaltyToday() { return (int) p.getLong("usageBase", 0); }
+    int autoPenaltyToday() { return (int) Math.max(0, p.getLong("usageBase", 0) - p.getLong("usageOff", 0)); }
+
+    /** True when part of today's screen time was ignored because it happened before Usage access was allowed. */
+    boolean usagePartlyIgnored() { return p.getLong("usageOff", 0) > 0; }
 
     /** Package currently in the foreground (best effort, needs usage access), or null. */
     String foregroundPackage() {
@@ -1099,6 +1141,33 @@ final class Store {
             }
         }
         e.putString("sessions", keep.toString());
+
+        // badge counters that were earned by today's sessions
+        boolean keptNight = false, keptEarly = false;
+        int keptMax = 0;
+        if (keep.length() > 0) {
+            for (String line : keep.toString().split("\n")) {
+                String[] a = line.split("\\|", 4);
+                if (a.length < 3) continue;
+                try {
+                    int hr = Integer.parseInt(a[1].substring(0, 2));
+                    if (hr >= 22 || hr < 4) keptNight = true;
+                    if (hr >= 4 && hr < 7) keptEarly = true;
+                    keptMax = Math.max(keptMax, Integer.parseInt(a[2]));
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        if (removedSessions > 0) {
+            if (!keptNight) e.putBoolean("fNight", false);
+            if (!keptEarly) e.putBoolean("fEarly", false);
+            if (keptMax < p.getInt("maxSession", 0)) e.putInt("maxSession", keptMax);
+        }
+        if (today.equals(p.getString("tcDay", ""))) {
+            e.putInt("totPomos", Math.max(0, p.getInt("totPomos", 0) - p.getInt("tcPomo", 0)));
+            e.putInt("cleanSessions", Math.max(0, p.getInt("cleanSessions", 0) - p.getInt("tcClean", 0)));
+            e.putInt("tcPomo", 0).putInt("tcClean", 0);
+        }
         e.putInt("totFocus", Math.max(0, p.getInt("totFocus", 0) - focus()));
         e.putInt("totSessions", Math.max(0, p.getInt("totSessions", 0) - removedSessions));
 
@@ -1150,6 +1219,7 @@ final class Store {
             int s = p.getInt("streak", 0);
             if (s > 1) e.putString("lastStudyDay", dayOffset(-1)).putInt("streak", s - 1);
             else e.remove("lastStudyDay").putInt("streak", 0);
+            if (today.equals(p.getString("pbDay", ""))) e.putInt("bestStreak", p.getInt("pb", 0)).remove("pbDay");
         }
         e.remove("celebrated");
 
@@ -1162,8 +1232,9 @@ final class Store {
         if (hasUsageAccess()) { int[] u = usageToday(); base = u[0] + u[1] + u[2]; }
 
         e.putInt("todayFocus", 0).putInt("todayBonus", 0).putInt("todayPenalty", 0).putInt("todayNet", 0).putInt("loggedNet", 0)
-                .putLong("usageBase", base).putBoolean("sOpen", false).putBoolean("sRun", false).putLong("sAcc", 0);
+                .putLong("usageBase", base).putLong("usageOff", base).putBoolean("sOpen", false).putBoolean("sRun", false).putLong("sAcc", 0);
         e.commit();
+        checkBadges(); // drops badges that are no longer earned
         return totalBefore - totalXp();
     }
 

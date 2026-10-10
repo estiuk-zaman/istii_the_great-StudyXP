@@ -8,6 +8,8 @@ import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.FrameLayout;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.Switch;
@@ -19,9 +21,10 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
-/** istii_the_great — entry point: lifecycle, settings screen, backup, milestones. */
+/** Pexumi Focus — entry point: lifecycle, settings screen, backup, milestones. */
 public class MainActivity extends TabsB {
     static boolean visible = false;
+    Tutorial tut;
     static final int REQ_EXPORT = 21, REQ_IMPORT = 22;
 
     // ============================================================ lifecycle
@@ -60,7 +63,22 @@ public class MainActivity extends TabsB {
         showTab(TAB_HOME, false);
         try { st.syncUsage(); } catch (Throwable e) { App.report(e); }
         XpWidget.refresh(this);
-        milestones();
+        if (!st.p.getBoolean("tutDone", false)) {
+            h.post(() -> showTutorial(Tutorial.intro(), true));
+        } else {
+            milestones();
+        }
+    }
+
+    /** Full-screen skippable tour. The first-run intro is marked as seen once it is closed (skipped or finished). */
+    void showTutorial(Tutorial.Slide[] slides, final boolean intro) {
+        if (tut != null || frame == null || isFinishing()) return;
+        tut = new Tutorial(this, slides, intro, () -> {
+            tut = null;
+            if (intro) st.p.edit().putBoolean("tutDone", true).apply();
+            milestones();
+        });
+        frame.addView(tut, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
     @Override protected void onResume() {
@@ -105,6 +123,7 @@ public class MainActivity extends TabsB {
     }
 
     @Override public void onBackPressed() {
+        if (tut != null) { tut.close(); return; }
         if (started && tab != TAB_HOME) showTab(TAB_HOME, true);
         else super.onBackPressed();
     }
@@ -122,6 +141,7 @@ public class MainActivity extends TabsB {
     }
 
     void milestones() {
+        if (tut != null) return;
         final int lv = st.pollLevelUp();
         if (lv >= 0) {
             enqueue(() -> {
@@ -167,8 +187,10 @@ public class MainActivity extends TabsB {
         showTab(tab, false);
     }
 
+    interface BoolCb { void accept(boolean v); }
+
     // ============================================================ SETTINGS
-    View toggleRow(String title, String sub, boolean on, final java.util.function.Consumer<Boolean> cb) {
+    View toggleRow(String title, String sub, boolean on, final BoolCb cb) {
         LinearLayout r = ui.hbox();
         r.setPadding(0, ui.dp(10), 0, ui.dp(10));
         LinearLayout mid = ui.vbox();
@@ -223,6 +245,20 @@ public class MainActivity extends TabsB {
         c1.addView(tr);
         col.addView(c1);
 
+        // tutorials
+        col.addView(section(t("Tutorials", "টিউটোরিয়াল")));
+        LinearLayout ct = ui.card();
+        ct.addView(actionRow("✨  " + t("Replay the intro tour", "ইন্ট্রো ট্যুর আবার দেখো"), t("The quick welcome tour", "ছোট্ট স্বাগত ট্যুর"), pal.accent,
+                v -> showTutorial(Tutorial.intro(), false)));
+        for (int gi = 0; gi < Tutorial.GUIDES.length; gi++) {
+            final int g = gi;
+            String[] gd = Tutorial.GUIDES[gi];
+            ct.addView(divider());
+            ct.addView(actionRow(gd[0] + "  " + (Lang.bn ? gd[2] : gd[1]), Lang.bn ? gd[4] : gd[3], pal.text,
+                    v -> showTutorial(Tutorial.guide(g), false)));
+        }
+        col.addView(ct);
+
         // pet
         col.addView(section(t("Your pet", "তোমার পেট")));
         LinearLayout cp = ui.card();
@@ -231,10 +267,11 @@ public class MainActivity extends TabsB {
         cp.addView(prev);
         LinearLayout pr = ui.hbox();
         pr.setGravity(Gravity.CENTER);
-        String[] pn = {"🦊 " + t("Fox", "শেয়াল"), "🐼 " + t("Panda", "পান্ডা"), "🐱 " + t("Cat", "বিড়াল"), "🐰 " + t("Bunny", "খরগোশ")};
-        for (int i = 0; i < 4; i++) {
-            final int idx = i;
-            pr.addView(ui.chip(pn[i], st.petType() == i, v -> { st.setPetType(idx); rebuild(); }), ui.lpm(Ui.W, Ui.W, 3, 0, 3, 0));
+        String[] pn = {"🌱 Pexumi", "🦊 " + t("Fox", "শেয়াল"), "🐼 " + t("Panda", "পান্ডা"), "🐱 " + t("Cat", "বিড়াল"), "🐰 " + t("Bunny", "খরগোশ")};
+        final int[] ptype = {4, 0, 1, 2, 3};
+        for (int i = 0; i < 5; i++) {
+            final int idx = ptype[i];
+            pr.addView(ui.chip(pn[i], st.petType() == idx, v -> { st.setPetType(idx); rebuild(); }), ui.lpm(Ui.W, Ui.W, 3, 0, 3, 0));
         }
         cp.addView(ui.hscroll(pr), ui.lpm(Ui.M, Ui.W, 0, 8, 0, 0));
         cp.addView(actionRow(t("Pet name", "পেটের নাম"), st.petName() + t("  ·  tap to rename", "  ·  নাম বদলাতে ট্যাপ করো"), pal.text, v ->
@@ -301,7 +338,7 @@ public class MainActivity extends TabsB {
         c5.addView(actionRow(t("Export backup", "ব্যাকআপ এক্সপোর্ট"), t("Saves a .json file you can keep anywhere", "একটা .json ফাইল সেভ হয়, যেখানে খুশি রাখো"), pal.text, v -> {
             try {
                 Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/json")
-                        .putExtra(Intent.EXTRA_TITLE, "istii_backup_" + st.date() + ".json");
+                        .putExtra(Intent.EXTRA_TITLE, "pexumi_backup_" + st.date() + ".json");
                 startActivityForResult(i, REQ_EXPORT);
             } catch (Throwable e) { snack(t("Can't open file picker", "ফাইল পিকার খোলা যাচ্ছে না")); }
         }));
@@ -337,10 +374,10 @@ public class MainActivity extends TabsB {
         // about
         col.addView(section(t("About", "সম্পর্কে")));
         LinearLayout c6 = ui.card();
-        c6.addView(ui.tvM("istii_the_great  v3.1", 16, pal.text));
+        c6.addView(ui.tvM(Brand.NAME + "  v" + Brand.VERSION, 16, pal.text));
         c6.addView(ui.tv(t("100% free · works offline · no ads · no account. Everything stays on this phone.",
                 "১০০% ফ্রি · অফলাইনে চলে · বিজ্ঞাপন নেই · অ্যাকাউন্ট লাগে না। সবকিছু এই ফোনেই থাকে।"), 13, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 6, 0, 0));
-        c6.addView(ui.tv(t("Widget: long-press your home screen → Widgets → istii_the_great.", "উইজেট: হোম স্ক্রিনে লং-প্রেস → Widgets → istii_the_great।"), 13, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 10, 0, 0));
+        c6.addView(ui.tv(t("Widget: long-press your home screen → Widgets → ", "উইজেট: হোম স্ক্রিনে লং-প্রেস → Widgets → ") + Brand.NAME, 13, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 10, 0, 0));
         col.addView(c6);
     }
 

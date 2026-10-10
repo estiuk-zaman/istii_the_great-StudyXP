@@ -76,7 +76,7 @@ abstract class TabsA extends BaseActivity {
         try {
             startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName())));
         } catch (Throwable e) {
-            snack(t("Open Settings → Apps → istii_the_great", "Settings → Apps → istii_the_great খোলো"));
+            snack(t("Open Settings → Apps → ", "Settings → Apps → ") + Brand.NAME);
         }
     }
 
@@ -86,8 +86,8 @@ abstract class TabsA extends BaseActivity {
         d.addView(ui.tv(t("Safe & private: this app has no internet permission at all, so nothing can ever leave your phone. It only reads how many minutes you spent on Instagram / Facebook / TikTok.",
                 "নিরাপদ ও প্রাইভেট: এই অ্যাপের ইন্টারনেট পারমিশনই নেই, তাই কিছুই ফোনের বাইরে যেতে পারে না। শুধু Instagram / Facebook / TikTok এ কত মিনিট কাটিয়েছ সেটা পড়ে।"),
                 13, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 8, 0, 0));
-        d.addView(ui.tvM(t("1.  Tap “Open usage access” and switch istii_the_great ON.",
-                "১.  “Open usage access” চেপে istii_the_great ON করো।"), 14, pal.text), ui.lpm(Ui.W, Ui.W, 0, 14, 0, 0));
+        d.addView(ui.tvM(t("1.  Tap “Open usage access” and switch " + Brand.NAME + " ON.",
+                "১.  “Open usage access” চেপে " + Brand.NAME + " ON করো।"), 14, pal.text), ui.lpm(Ui.W, Ui.W, 0, 14, 0, 0));
         d.addView(ui.tvM(t("2.  Switch greyed out? Android blocks special permissions for apps installed outside the Play Store. Tap “App info”, then ⋮ (top-right) → “Allow restricted settings”, then repeat step 1.",
                 "২.  সুইচ ধূসর? Play Store-এর বাইরে থেকে ইনস্টল করা অ্যাপের স্পেশাল পারমিশন Android আটকে রাখে। “App info” চেপে ⋮ (উপরে ডানে) → “Allow restricted settings” দাও, তারপর আবার ১ নম্বর করো।"),
                 14, pal.text), ui.lpm(Ui.W, Ui.W, 0, 10, 0, 0));
@@ -221,7 +221,7 @@ abstract class TabsA extends BaseActivity {
         hero.addView(fv, new FrameLayout.LayoutParams(Ui.M, Ui.M));
         LinearLayout ov = ui.vbox();
         ov.setPadding(ui.dp(20), ui.dp(18), ui.dp(150), 0);
-        ov.addView(ui.caps("istii_the_great", pal.accent));
+        ov.addView(ui.caps(Brand.NAME, pal.accent));
         ov.addView(ui.tvM(greet + ",", 15, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 12, 0, 0));
         TextView nameTv = ui.tvM(st.name(), 28, pal.text);
         nameTv.setSingleLine(true);
@@ -695,6 +695,7 @@ abstract class TabsA extends BaseActivity {
             for (int i = 0; i < 3; i++) ac.addView(statRow(i == 0 ? 0xFFE1306C : i == 1 ? 0xFF1877F2 : 0xFF25F4EE, Store.TRACKED_NAMES[i], u[i] + t(" min", " মি.")));
             ac.addView(divider());
             ac.addView(ui.tv(t("Auto penalty today: −", "আজকের অটো পেনাল্টি: −") + st.autoPenaltyToday() + " XP", 13, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 10, 0, 0));
+            if (st.usagePartlyIgnored()) ac.addView(ui.tv(t("Minutes used before you allowed Usage access are not charged.", "Usage access দেওয়ার আগের মিনিটগুলো ধরা হয় না।"), 12, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 6, 0, 0));
         } else {
             ac.addView(ui.tvM(t("Track social-media time automatically", "সোশ্যাল মিডিয়ার সময় নিজে নিজে ট্র্যাক"), 16, pal.text));
             ac.addView(ui.tv(t("Allow usage access and every minute on Instagram, Facebook or TikTok becomes −1 XP. It uses Android's own stats; nothing leaves your phone.",

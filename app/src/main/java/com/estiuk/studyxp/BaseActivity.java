@@ -361,7 +361,7 @@ abstract class BaseActivity extends Activity {
         int pd = (int) (20 * getResources().getDisplayMetrics().density);
         l.setPadding(pd, pd * 2, pd, pd);
         TextView title = new TextView(this);
-        title.setText("istii_the_great — error report");
+        title.setText(Brand.NAME + " — error report");
         title.setTextColor(0xFFF2C14E);
         title.setTextSize(20);
         title.setTypeface(Typeface.DEFAULT_BOLD);

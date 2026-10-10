@@ -234,7 +234,7 @@ abstract class TabsB extends TabsA {
         if (top != null) wc.addView(ui.tv(t("Top subject: ", "সেরা সাবজেক্ট: ") + top[0] + " (" + dur(parseInt(top[1], 0)) + ")", 13, pal.accent), ui.lpm(Ui.W, Ui.W, 0, 8, 0, 12));
         else wc.addView(ui.tv("", 1, pal.dim));
         wc.addView(ui.button(t("Share report", "রিপোর্ট শেয়ার"), false, v -> {
-            String txt = "istii_the_great — " + t("weekly report", "সাপ্তাহিক রিপোর্ট") + "\n"
+            String txt = Brand.NAME + " — " + t("weekly report", "সাপ্তাহিক রিপোর্ট") + "\n"
                     + t("Net XP: ", "নেট XP: ") + a[0] + " (" + delta(a[0], b[0]) + ")\n"
                     + t("Focus: ", "ফোকাস: ") + dur(a[1]) + "\n"
                     + t("Study days: ", "স্টাডি ডে: ") + a[2] + "/7\n"

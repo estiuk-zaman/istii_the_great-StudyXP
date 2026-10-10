@@ -24,6 +24,8 @@ final class PetView extends View {
     private static final int SCARF = 0xFFE2574C, LEAF = 0xFF5BD38A, LEAF2 = 0xFF2E9E62, GOLD = 0xFFF5C84C, GOLD2 = 0xFFD99A1F, GLASS = 0xFF3A3A4A;
     private static final int EGG = 0xFFFFF3D6, EGG_SP = 0xFF8FD6A6, BOOK = 0xFFFDF6E3, BOOK2 = 0xFF3F8F63, HEART = 0xFFFF6B8A;
 
+    private static final int PEX_B = 0xFFB4EACD, PEX_LIGHT = 0xFFDDF8EA, PEX_SHADE = 0xFF86CFA8;
+
     private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint tp = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
@@ -115,7 +117,86 @@ final class PetView extends View {
     private void ring(float cx, float cy, float r, float w, int color) { arc(cx, cy, r, 0, 360, w, color); }
 
     // ------------------------------------------------------------ pet body
+    /** The app mascot: a soft mint blob with a leaf sprout, big shiny eyes and rosy cheeks. */
+    private void drawPexumi(float bob, float wag, float blink) {
+        float hy = -40 + bob;
+        float ex = 11.5f;
+        if (level >= 5) for (int i = 0; i < 6; i++) circle(0, -40 + bob, 72 - i * 9, GOLD, 14);
+        oval(0, 0, 31, 5, 0xFF000000, 55);
+
+        // feet + body
+        oval(-14, -3, 10.5f, 6, PEX_SHADE);
+        oval(14, -3, 10.5f, 6, PEX_SHADE);
+        oval(0, -30 + bob * 0.5f, 31, 30, PEX_SHADE);
+        oval(0, -31 + bob * 0.5f, 30, 29.5f, PEX_B);
+        oval(0, -20 + bob * 0.5f, 19, 15, PEX_LIGHT, 170);
+        oval(-14, -52 + bob, 9, 5.5f, WHITE, 110);
+
+        // little arms
+        rotOval(-29, -26 + bob * 0.6f, 6.5f, 10, 22, PEX_B);
+        rotOval(29, -26 + bob * 0.6f, 6.5f, 10, -22, PEX_B);
+
+        // eyes
+        boolean closed = mood == 0 && !focusing;
+        boolean happy = mood == 3 && !focusing;
+        if (closed) {
+            arc(-ex, hy - 1, 4.6f, 20, 140, 2.2f, DARK);
+            arc(ex, hy - 1, 4.6f, 20, 140, 2.2f, DARK);
+        } else if (happy) {
+            arc(-ex, hy + 1, 4.8f, 200, 140, 2.4f, DARK);
+            arc(ex, hy + 1, 4.8f, 200, 140, 2.4f, DARK);
+        } else {
+            float hh = Math.max(0.7f, 6.4f * blink);
+            oval(-ex, hy, 5.4f, hh, DARK);
+            oval(ex, hy, 5.4f, hh, DARK);
+            if (blink > 0.5f) {
+                circle(-ex - 1.8f, hy - 2.6f, 1.9f, WHITE);
+                circle(ex - 1.8f, hy - 2.6f, 1.9f, WHITE);
+                circle(-ex + 1.8f, hy + 2.2f, 0.9f, WHITE);
+                circle(ex + 1.8f, hy + 2.2f, 0.9f, WHITE);
+            }
+        }
+        oval(-21, hy + 9, 6.4f, 3.8f, BLUSH, 135);
+        oval(21, hy + 9, 6.4f, 3.8f, BLUSH, 135);
+        if (happy || mood >= 2) {
+            oval(0, hy + 10, 3.6f, 3f, 0xFF7A2E3A);
+            oval(0, hy + 11.2f, 2.1f, 1.3f, 0xFFFF8FA0);
+        } else if (closed) {
+            arc(0, hy + 8.5f, 2.4f, 20, 140, 1.7f, DARK);
+        } else {
+            oval(0, hy + 9.5f, 2.2f, 1.9f, 0xFF7A2E3A);
+        }
+
+        // sprout
+        float sway = wag * 0.6f;
+        line(0, hy - 19, 0, hy - 27, 2.2f, LEAF2);
+        rotOval(-8, hy - 30, 9.5f, 4.6f, -22 - sway, LEAF);
+        rotOval(8, hy - 31, 9.5f, 4.6f, 22 + sway, LEAF2);
+
+        // graduation cap (level 4+) like on the mascot
+        if (level >= 4) {
+            poly(GOLD2, 3, hy - 22, 16, hy - 27, 30, hy - 22, 17, hy - 17);
+            poly(GOLD, 3, hy - 24, 16, hy - 29, 30, hy - 24, 17, hy - 19);
+            oval(16.5f, hy - 18.5f, 8, 3.3f, GOLD2);
+            circle(16.5f, hy - 25, 1.4f, 0xFFFFF4C2);
+            line(30, hy - 24, 31, hy - 14, 1.3f, GOLD2);
+            circle(31, hy - 13, 1.8f, GOLD);
+        }
+        if (level >= 3) {
+            poly(0xFFFFE08A, -34, hy - 8, -31, hy - 14, -28, hy - 8, -31, hy - 2);
+        }
+        if (level >= 6) {
+            poly(0xFFFFE08A, 36, hy - 34, 39, hy - 41, 42, hy - 34, 39, hy - 27);
+        }
+        if (focusing) {
+            poly(BOOK2, -17, -25 + bob, 0, -21 + bob, 17, -25 + bob, 17, -9 + bob, 0, -5 + bob, -17, -9 + bob);
+            poly(BOOK, -15, -24 + bob, 0, -20.5f + bob, 15, -24 + bob, 15, -11 + bob, 0, -7.5f + bob, -15, -11 + bob);
+            line(0, -20.5f + bob, 0, -7.5f + bob, 1.2f, BOOK2);
+        }
+    }
+
     private void drawPet(float bob, float wag, float blink) {
+        if (type == 4) { drawPexumi(bob, wag, blink); return; }
         int body, belly, inner;
         switch (type) {
             case 0: body = FOX_B; belly = FOX_BELLY; inner = FOX_IN; break;
