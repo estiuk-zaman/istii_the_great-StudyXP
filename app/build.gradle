@@ -7,8 +7,8 @@ android {
         applicationId 'com.istii.thegreat'
         minSdk 21
         targetSdk 35
-        versionCode 6
-        versionName '4.1'
+        versionCode 7
+        versionName '5.0'
     }
     // Fixed debug key: every build is signed the same way, so new APKs install as updates (data is kept).
     signingConfigs {

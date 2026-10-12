@@ -47,7 +47,7 @@ final class Tutorial extends FrameLayout {
     // ------------------------------------------------------------------ content
     static Slide[] intro() {
         return new Slide[]{
-                s(IMG, "", "Meet Pexumi Focus", "Pexumi Focus এ স্বাগতম",
+                s(EMOJI, "🌱", "Meet " + Brand.NAME, Brand.NAME + " এ স্বাগতম",
                         "Study, earn XP, grow your forest and raise a tiny buddy. Everything stays on your phone.",
                         "পড়ো, XP জমাও, তোমার বন আর ছোট্ট বন্ধুকে বড় করো। সবকিছু তোমার ফোনেই থাকে।"),
                 s(EMOJI, "⏱️", "Focus = XP", "ফোকাস = XP",
