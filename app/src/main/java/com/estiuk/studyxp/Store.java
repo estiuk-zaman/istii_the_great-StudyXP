@@ -310,6 +310,12 @@ final class Store {
             }
             e.putString("day", today).putInt("todayFocus", 0).putInt("todayBonus", 0).putInt("todayPenalty", 0)
                     .putInt("todayNet", 0).putInt("loggedNet", 0).putLong("usageBase", 0).putLong("usageOff", 0).apply();
+            // streak freeze: exactly one missed day (yesterday) with a live streak and a token available keeps the streak alive
+            String lsd = p.getString("lastStudyDay", "");
+            int ft = freezeTokens();
+            if (!lsd.isEmpty() && lsd.equals(dayOffset(-2)) && p.getInt("streak", 0) > 0 && ft > 0) {
+                p.edit().putString("lastStudyDay", dayOffset(-1)).putInt("freezeTokens", ft - 1).putString("freezeUsedOn", today).apply();
+            }
             // drop tasks that were completed on an earlier day
             try {
                 JSONArray a = new JSONArray(p.getString("tasks", "[]")), out = new JSONArray();
@@ -415,6 +421,30 @@ final class Store {
 
     int bestStreak() { return Math.max(p.getInt("bestStreak", 0), streak()); }
     boolean studyDayDone() { return date().equals(p.getString("lastStudyDay", "")); }
+
+    // ------------------------------------------------------------ streak freeze
+    static final int FREEZE_MONTHLY = 2;
+
+    /** Freeze tokens left this calendar month (auto-refills once a new month starts). */
+    int freezeTokens() {
+        String curMonth = new SimpleDateFormat("yyyy-MM", Locale.US).format(new Date());
+        String savedMonth = p.getString("freezeMonth", "");
+        if (!curMonth.equals(savedMonth)) {
+            p.edit().putString("freezeMonth", curMonth).putInt("freezeTokens", FREEZE_MONTHLY).apply();
+            return FREEZE_MONTHLY;
+        }
+        return p.getInt("freezeTokens", FREEZE_MONTHLY);
+    }
+
+    /** True once, right after a freeze token was auto-used to save a streak. */
+    boolean pollFreezeUsed() {
+        String used = p.getString("freezeUsedOn", "");
+        if (!used.isEmpty() && !used.equals(p.getString("freezeSeen", ""))) {
+            p.edit().putString("freezeSeen", used).apply();
+            return true;
+        }
+        return false;
+    }
 
     boolean pollStudyDay() {
         if (studyDayDone() && !date().equals(p.getString("celebrated", ""))) {
@@ -571,20 +601,21 @@ final class Store {
     }
 
     // ============================================================ subjects
+    /** Each entry: {name, colorIndex, dailyGoalMinutes (0 = none)}. */
     List<String[]> subjects() {
         List<String[]> out = new ArrayList<>();
         String s = p.getString("subjects", "");
         if (s.isEmpty()) return out;
         for (String line : s.split("\n")) {
             String[] a = line.split("\\|");
-            if (a.length >= 1 && !a[0].isEmpty()) out.add(new String[]{a[0], a.length > 1 ? a[1] : "0"});
+            if (a.length >= 1 && !a[0].isEmpty()) out.add(new String[]{a[0], a.length > 1 ? a[1] : "0", a.length > 2 ? a[2] : "0"});
         }
         return out;
     }
 
     private void saveSubjects(List<String[]> l) {
         StringBuilder sb = new StringBuilder();
-        for (String[] a : l) { if (sb.length() > 0) sb.append('\n'); sb.append(a[0]).append('|').append(a[1]); }
+        for (String[] a : l) { if (sb.length() > 0) sb.append('\n'); sb.append(a[0]).append('|').append(a[1]).append('|').append(a.length > 2 ? a[2] : "0"); }
         p.edit().putString("subjects", sb.toString()).apply();
     }
 
@@ -593,9 +624,28 @@ final class Store {
         if (name.isEmpty()) return false;
         List<String[]> l = subjects();
         for (String[] a : l) if (a[0].equalsIgnoreCase(name)) return false;
-        l.add(new String[]{name, String.valueOf(color)});
+        l.add(new String[]{name, String.valueOf(color), "0"});
         saveSubjects(l);
         return true;
+    }
+
+    /** Sets (or clears, with 0) a subject's own daily focus-minute goal. */
+    void setSubjectGoal(String name, int mins) {
+        List<String[]> l = subjects(), out = new ArrayList<>();
+        for (String[] a : l) out.add(a[0].equals(name) ? new String[]{a[0], a[1], String.valueOf(Math.max(0, mins))} : a);
+        saveSubjects(out);
+    }
+
+    int subjectGoal(String name) {
+        for (String[] a : subjects()) if (a[0].equals(name) && a.length > 2) { try { return Integer.parseInt(a[2]); } catch (Exception ignored) { } }
+        return 0;
+    }
+
+    /** Minutes focused on a subject today (from the session log). */
+    int subjectMinutesToday(String name) {
+        int sum = 0;
+        for (String[] s : sessionsOn(date())) if (s[2].equals(name)) { try { sum += Integer.parseInt(s[1]); } catch (Exception ignored) { } }
+        return sum;
     }
 
     void deleteSubject(String name) {
@@ -650,9 +700,15 @@ final class Store {
 
     // ============================================================ tasks
     static final class Task {
-        String id, title, subject;
+        String id, title, subject, due;   // due = "" (no deadline) or "yyyy-MM-dd"
         int xp;
         boolean done;
+        List<Sub> subs = new ArrayList<>();
+
+        static final class Sub {
+            String id, title;
+            boolean done;
+        }
     }
 
     List<Task> tasks() {
@@ -667,6 +723,18 @@ final class Store {
                 t.subject = o.optString("s");
                 t.xp = o.optInt("x", 10);
                 t.done = o.optBoolean("d");
+                t.due = o.optString("due");
+                JSONArray sa = o.optJSONArray("sub");
+                if (sa != null) {
+                    for (int j = 0; j < sa.length(); j++) {
+                        JSONObject so = sa.getJSONObject(j);
+                        Task.Sub sub = new Task.Sub();
+                        sub.id = so.optString("id");
+                        sub.title = so.optString("t");
+                        sub.done = so.optBoolean("d");
+                        t.subs.add(sub);
+                    }
+                }
                 out.add(t);
             }
         } catch (Exception ignored) {
@@ -674,10 +742,71 @@ final class Store {
         return out;
     }
 
-    void addTask(String title, String subject, int xp) {
+    void addTask(String title, String subject, int xp, String due) {
         try {
             JSONArray a = new JSONArray(p.getString("tasks", "[]"));
-            a.put(new JSONObject().put("id", Long.toString(System.nanoTime(), 36)).put("t", clean(title)).put("s", clean(subject)).put("x", xp).put("d", false));
+            a.put(new JSONObject().put("id", Long.toString(System.nanoTime(), 36)).put("t", clean(title)).put("s", clean(subject))
+                    .put("x", xp).put("d", false).put("due", due == null ? "" : due).put("sub", new JSONArray()));
+            p.edit().putString("tasks", a.toString()).apply();
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** Adds a checklist item under a task. */
+    void addSubtask(String taskId, String title) {
+        try {
+            JSONArray a = new JSONArray(p.getString("tasks", "[]"));
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.getJSONObject(i);
+                if (o.optString("id").equals(taskId)) {
+                    JSONArray sa = o.optJSONArray("sub");
+                    if (sa == null) sa = new JSONArray();
+                    sa.put(new JSONObject().put("id", Long.toString(System.nanoTime(), 36)).put("t", clean(title)).put("d", false));
+                    o.put("sub", sa);
+                    break;
+                }
+            }
+            p.edit().putString("tasks", a.toString()).apply();
+        } catch (Exception ignored) {
+        }
+    }
+
+    void toggleSubtask(String taskId, String subId) {
+        try {
+            JSONArray a = new JSONArray(p.getString("tasks", "[]"));
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.getJSONObject(i);
+                if (o.optString("id").equals(taskId)) {
+                    JSONArray sa = o.optJSONArray("sub");
+                    if (sa != null) {
+                        for (int j = 0; j < sa.length(); j++) {
+                            JSONObject so = sa.getJSONObject(j);
+                            if (so.optString("id").equals(subId)) so.put("d", !so.optBoolean("d"));
+                        }
+                    }
+                    break;
+                }
+            }
+            p.edit().putString("tasks", a.toString()).apply();
+        } catch (Exception ignored) {
+        }
+    }
+
+    void deleteSubtask(String taskId, String subId) {
+        try {
+            JSONArray a = new JSONArray(p.getString("tasks", "[]"));
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.getJSONObject(i);
+                if (o.optString("id").equals(taskId)) {
+                    JSONArray sa = o.optJSONArray("sub");
+                    if (sa != null) {
+                        JSONArray out = new JSONArray();
+                        for (int j = 0; j < sa.length(); j++) if (!sa.getJSONObject(j).optString("id").equals(subId)) out.put(sa.getJSONObject(j));
+                        o.put("sub", out);
+                    }
+                    break;
+                }
+            }
             p.edit().putString("tasks", a.toString()).apply();
         } catch (Exception ignored) {
         }
@@ -721,11 +850,62 @@ final class Store {
         }
     }
 
+    // ============================================================ exams / deadlines
+    static final class Exam {
+        String id, name, subject, date;   // date = "yyyy-MM-dd"
+    }
+
+    List<Exam> exams() {
+        List<Exam> out = new ArrayList<>();
+        try {
+            JSONArray a = new JSONArray(p.getString("exams", "[]"));
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.getJSONObject(i);
+                Exam ex = new Exam();
+                ex.id = o.optString("id");
+                ex.name = o.optString("n");
+                ex.subject = o.optString("s");
+                ex.date = o.optString("d");
+                out.add(ex);
+            }
+        } catch (Exception ignored) {
+        }
+        java.util.Collections.sort(out, (x, y) -> x.date.compareTo(y.date));
+        return out;
+    }
+
+    private void saveExams(List<Exam> l) {
+        try {
+            JSONArray a = new JSONArray();
+            for (Exam e : l) a.put(new JSONObject().put("id", e.id).put("n", e.name).put("s", e.subject).put("d", e.date));
+            p.edit().putString("exams", a.toString()).apply();
+        } catch (Exception ignored) {
+        }
+    }
+
+    void addExam(String name, String subject, String date) {
+        List<Exam> l = exams();
+        Exam e = new Exam();
+        e.id = "e" + Long.toString(System.nanoTime(), 36);
+        e.name = clean(name);
+        e.subject = clean(subject);
+        e.date = date;
+        l.add(e);
+        saveExams(l);
+    }
+
+    void deleteExam(String id) {
+        List<Exam> l = exams();
+        for (int i = 0; i < l.size(); i++) if (l.get(i).id.equals(id)) { l.remove(i); break; }
+        saveExams(l);
+    }
+
     // ============================================================ custom rewards
     static final class Reward {
         String id, name;
         int xp;
         boolean claimed;
+        long deadline;   // 0 = no deadline, else epoch millis by which xp should be reached
     }
 
     List<Reward> rewards() {
@@ -739,6 +919,7 @@ final class Store {
                 r.name = o.optString("n");
                 r.xp = o.optInt("x");
                 r.claimed = o.optBoolean("c");
+                r.deadline = o.optLong("dl", 0);
                 out.add(r);
             }
         } catch (Exception ignored) {
@@ -750,25 +931,26 @@ final class Store {
     private void saveRewards(List<Reward> l) {
         try {
             JSONArray a = new JSONArray();
-            for (Reward r : l) a.put(new JSONObject().put("id", r.id).put("n", r.name).put("x", r.xp).put("c", r.claimed));
+            for (Reward r : l) a.put(new JSONObject().put("id", r.id).put("n", r.name).put("x", r.xp).put("c", r.claimed).put("dl", r.deadline));
             p.edit().putString("rewards", a.toString()).apply();
         } catch (Exception ignored) {
         }
     }
 
-    void addReward(String name, int xp) {
+    void addReward(String name, int xp, long deadline) {
         List<Reward> l = rewards();
         Reward r = new Reward();
         r.id = "r" + Long.toString(System.nanoTime(), 36);
         r.name = clean(name);
         r.xp = Math.max(1, xp);
+        r.deadline = deadline;
         l.add(r);
         saveRewards(l);
     }
 
-    void updateReward(String id, String name, int xp) {
+    void updateReward(String id, String name, int xp, long deadline) {
         List<Reward> l = rewards();
-        for (Reward r : l) if (r.id.equals(id)) { r.name = clean(name); r.xp = Math.max(1, xp); }
+        for (Reward r : l) if (r.id.equals(id)) { r.name = clean(name); r.xp = Math.max(1, xp); r.deadline = deadline; }
         saveRewards(l);
     }
 

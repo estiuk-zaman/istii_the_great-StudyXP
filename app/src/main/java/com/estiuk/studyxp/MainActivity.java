@@ -179,6 +179,9 @@ public class MainActivity extends TabsB {
         if (st.pollStudyDay()) {
             snack("🔥 " + t("Study day complete! Streak: ", "স্টাডি ডে সম্পূর্ণ! স্ট্রিক: ") + st.streak());
         }
+        if (st.pollFreezeUsed()) {
+            snack("🧊 " + t("Streak freeze used — your streak is safe!", "স্ট্রিক ফ্রিজ ব্যবহার হয়েছে — তোমার স্ট্রিক নিরাপদ!"));
+        }
     }
 
     /** Rebuild window chrome after a language / theme change. */

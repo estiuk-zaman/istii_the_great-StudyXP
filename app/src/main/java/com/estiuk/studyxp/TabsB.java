@@ -51,45 +51,51 @@ abstract class TabsB extends TabsA {
         th.addView(section(t("Tasks", "টাস্ক")), new LinearLayout.LayoutParams(0, Ui.W, 1f));
         th.addView(ui.chip("+ " + t("Add", "যোগ"), true, v -> taskDialog()));
         col.addView(th);
-        List<Store.Task> tasks = st.tasks();
+        List<Store.Task> allTasks = st.tasks();
+        List<Store.Task> today = new java.util.ArrayList<>(), upcoming = new java.util.ArrayList<>();
+        for (Store.Task k : allTasks) (k.due.isEmpty() ? today : upcoming).add(k);
+        java.util.Collections.sort(upcoming, (x, y) -> x.due.compareTo(y.due));
         LinearLayout tc = ui.card();
-        if (tasks.isEmpty()) {
+        if (today.isEmpty() && upcoming.isEmpty()) {
             tc.addView(ui.tv(t("No tasks yet. Add one — finishing it gives bonus XP ✅", "এখনো কোনো টাস্ক নেই। যোগ করো — শেষ করলে বোনাস XP ✅"), 14, pal.dim));
         }
-        for (int i = 0; i < tasks.size(); i++) {
-            final Store.Task k = tasks.get(i);
+        for (int i = 0; i < today.size(); i++) {
             if (i > 0) tc.addView(divider());
-            LinearLayout r = ui.hbox();
-            r.setPadding(0, ui.dp(10), 0, ui.dp(10));
-            TextView box = ui.tvM(k.done ? "✓" : "", 16, pal.onAccent);
-            box.setGravity(Gravity.CENTER);
-            android.graphics.drawable.GradientDrawable bg = ui.shape(k.done ? pal.accent : Color.TRANSPARENT, 8, k.done ? pal.accent : pal.dim, 2);
-            box.setBackground(bg);
-            r.addView(box, new LinearLayout.LayoutParams(ui.dp(26), ui.dp(26)));
-            LinearLayout mid = ui.vbox();
-            TextView tt = ui.tvM(k.title, 15, k.done ? pal.dim : pal.text);
-            if (k.done) tt.setPaintFlags(tt.getPaintFlags() | android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);
-            mid.addView(tt);
-            if (!k.subject.isEmpty()) mid.addView(ui.tv(k.subject, 12, st.subjectColor(k.subject)), ui.lpm(Ui.W, Ui.W, 0, 3, 0, 0));
-            r.addView(mid, ui.lpm(0, Ui.W, 12, 0, 8, 0));
-            weight(mid);
-            r.addView(ui.tvM("+" + k.xp, 14, pal.gold));
-            r.addView(smallBtn("✕", Color.TRANSPARENT, pal.dim, v -> confirm(t("Delete task?", "টাস্ক মুছবে?"), k.title,
-                    t("Delete", "মুছো"), true, () -> {
-                        if (k.done) { st.addBonus(-k.xp); st.unlogAct("T", k.title, k.xp); }
-                        st.deleteTask(k.id);
-                        afterChange();
-                    })), ui.lpm(ui.dp(34), ui.dp(34), 6, 0, 0, 0));
-            r.setOnClickListener(v -> {
-                int d = st.toggleTask(k.id);
-                if (d > 0) { Sfx.success(st, this); snack("+" + d + " XP ✅"); }
-                else if (d < 0) { Sfx.tap(st, this); snack(d + " XP"); }
-                afterChange();
-            });
-            tc.addView(r);
+            tc.addView(taskRow(today.get(i), null));
         }
         col.addView(tc);
         col.addView(ui.tv(t("Completed tasks clear themselves the next day.", "শেষ করা টাস্ক পরের দিন নিজে থেকে সরে যায়।"), 12, pal.dim), ui.lpm(Ui.W, Ui.W, 4, 8, 0, 0));
+
+        if (!upcoming.isEmpty()) {
+            col.addView(section(t("Upcoming (by date)", "আসন্ন (তারিখ অনুযায়ী)")));
+            LinearLayout uc = ui.card();
+            String todayStr = st.date();
+            for (int i = 0; i < upcoming.size(); i++) {
+                Store.Task k = upcoming.get(i);
+                if (i > 0) uc.addView(divider());
+                boolean overdue = !k.done && k.due.compareTo(todayStr) < 0;
+                uc.addView(taskRow(k, overdue ? t("Overdue", "মেয়াদ শেষ") : dueLabel(k.due, todayStr)));
+            }
+            col.addView(uc);
+        }
+
+        // exams / deadlines
+        LinearLayout eh = ui.hbox();
+        eh.addView(section(t("Exams & deadlines", "পরীক্ষা ও ডেডলাইন")), new LinearLayout.LayoutParams(0, Ui.W, 1f));
+        eh.addView(ui.chip("+ " + t("Add", "যোগ"), true, v -> examDialog()));
+        col.addView(eh);
+        List<Store.Exam> exams = st.exams();
+        LinearLayout exc = ui.card();
+        if (exams.isEmpty()) {
+            exc.addView(ui.tv(t("No exams added. Add one to see a countdown.", "কোনো পরীক্ষা যোগ করা নেই। যোগ করলে কাউন্টডাউন দেখবে।"), 14, pal.dim));
+        } else {
+            String todayStr2 = st.date();
+            for (int i = 0; i < exams.size(); i++) {
+                if (i > 0) exc.addView(divider());
+                exc.addView(examRow(exams.get(i), todayStr2));
+            }
+        }
+        col.addView(exc);
 
         // subjects
         LinearLayout sh = ui.hbox();
@@ -101,15 +107,23 @@ abstract class TabsB extends TabsA {
         if (subs.isEmpty()) sc.addView(ui.tv(t("No subjects. Add one to tag your sessions.", "কোনো সাবজেক্ট নেই। সেশন ট্যাগ করতে যোগ করো।"), 14, pal.dim));
         for (int i = 0; i < subs.size(); i++) {
             final String name = subs.get(i)[0];
+            final int gm = subs.get(i).length > 2 ? parseInt(subs.get(i)[2], 0) : 0;
             if (i > 0) sc.addView(divider());
             LinearLayout r = ui.hbox();
             r.setPadding(0, ui.dp(10), 0, ui.dp(10));
             View d = new View(this);
             d.setBackground(ui.oval(st.subjectColor(name)));
             r.addView(d, new LinearLayout.LayoutParams(ui.dp(12), ui.dp(12)));
-            TextView nm = ui.tvM(name, 15, pal.text);
-            r.addView(nm, ui.lpm(0, Ui.W, 12, 0, 0, 0));
-            weight(nm);
+            LinearLayout mid2 = ui.vbox();
+            mid2.addView(ui.tvM(name, 15, pal.text));
+            if (gm > 0) {
+                int gdone = st.subjectMinutesToday(name);
+                mid2.addView(ui.tv(dur(gdone) + " / " + dur(gm) + t(" today", " আজ"), 11.5f, gdone >= gm ? pal.accent : pal.dim), ui.lpm(Ui.W, Ui.W, 0, 2, 0, 0));
+            }
+            mid2.setClickable(true);
+            mid2.setOnClickListener(v -> subjectGoalDialog(name, gm));
+            r.addView(mid2, ui.lpm(0, Ui.W, 12, 0, 0, 0));
+            weight(mid2);
             r.addView(smallBtn("✕", Color.TRANSPARENT, pal.dim, v -> confirm(t("Delete subject?", "সাবজেক্ট মুছবে?"),
                     t("Past sessions keep their XP.", "আগের সেশনের XP থাকবে।"), t("Delete", "মুছো"), true, () -> {
                         st.deleteSubject(name);
@@ -117,6 +131,7 @@ abstract class TabsB extends TabsA {
                     })), new LinearLayout.LayoutParams(ui.dp(34), ui.dp(34)));
             sc.addView(r);
         }
+        if (!subs.isEmpty()) sc.addView(ui.tv(t("Tap a subject to set its own daily goal.", "দৈনিক লক্ষ্য ঠিক করতে সাবজেক্টে ট্যাপ করো।"), 11.5f, pal.dim), ui.lpm(Ui.W, Ui.W, 4, 10, 0, 0));
         col.addView(sc);
     }
 
@@ -128,11 +143,13 @@ abstract class TabsB extends TabsA {
         d.addView(e, ui.lpm(Ui.M, Ui.W, 0, 14, 0, 0));
         final String[] subj = {""};
         final int[] xp = {10};
+        final String[] due = {""};
         d.addView(ui.caps(t("Subject (optional)", "সাবজেক্ট (ঐচ্ছিক)"), pal.dim), ui.lpm(Ui.W, Ui.W, 2, 16, 0, 8));
         final LinearLayout sr = ui.hbox();
         final List<String[]> subs = st.subjects();
         final Runnable[] paint = new Runnable[1];
         final LinearLayout xr = ui.hbox();
+        final LinearLayout dr = ui.hbox();
         paint[0] = () -> {
             sr.removeAllViews();
             sr.addView(ui.chip(t("None", "নেই"), subj[0].isEmpty(), v -> { subj[0] = ""; paint[0].run(); }), ui.lpm(Ui.W, Ui.W, 0, 0, 8, 0));
@@ -143,18 +160,33 @@ abstract class TabsB extends TabsA {
             for (final int x : new int[]{5, 10, 15, 20, 30}) {
                 xr.addView(ui.chipColor("+" + x, xp[0] == x, pal.gold, v -> { xp[0] = x; paint[0].run(); }), ui.lpm(Ui.W, Ui.W, 0, 0, 8, 0));
             }
+            dr.removeAllViews();
+            dr.addView(ui.chip(t("Today only", "শুধু আজ"), due[0].isEmpty(), v -> { due[0] = ""; paint[0].run(); }), ui.lpm(Ui.W, Ui.W, 0, 0, 8, 0));
+            int[] dpresets = {3, 7, 14, 30};
+            String[] dlabels = {t("3 days", "৩ দিন"), t("1 week", "১ সপ্তাহ"), t("2 weeks", "২ সপ্তাহ"), t("1 month", "১ মাস")};
+            for (int i = 0; i < dpresets.length; i++) {
+                final int days = dpresets[i];
+                final String dd = st.dayOffset(days);
+                dr.addView(ui.chip(dlabels[i], due[0].equals(dd), v -> { due[0] = dd; paint[0].run(); }), ui.lpm(Ui.W, Ui.W, 0, 0, 8, 0));
+            }
+            boolean custom = !due[0].isEmpty() && !due[0].equals(st.dayOffset(3)) && !due[0].equals(st.dayOffset(7)) && !due[0].equals(st.dayOffset(14)) && !due[0].equals(st.dayOffset(30));
+            dr.addView(ui.chip(custom ? t("Custom: ", "কাস্টম: ") + due[0] : "✎ " + t("Custom", "কাস্টম"), custom, v ->
+                    promptText(t("Due in how many days?", "কত দিনের মধ্যে?"), t("Days", "দিন"), "7", InputType.TYPE_CLASS_NUMBER,
+                            s2 -> { due[0] = st.dayOffset(Math.max(1, parseInt(s2, 7))); paint[0].run(); })));
         };
         paint[0].run();
         d.addView(ui.hscroll(sr));
         d.addView(ui.caps(t("Bonus XP when done", "শেষ করলে বোনাস XP"), pal.dim), ui.lpm(Ui.W, Ui.W, 2, 16, 0, 8));
         d.addView(ui.hscroll(xr));
+        d.addView(ui.caps(t("Deadline", "ডেডলাইন"), pal.dim), ui.lpm(Ui.W, Ui.W, 2, 16, 0, 8));
+        d.addView(ui.hscroll(dr));
         final Dialog dlg = ui.dialog(d);
         LinearLayout btns = ui.hbox();
         btns.addView(ui.button(t("Cancel", "বাতিল"), false, v -> dlg.dismiss()), ui.lpm(0, Ui.W, 0, 0, 6, 0));
         btns.addView(ui.button(t("Add", "যোগ করো"), true, v -> {
             String title = Store.clean(e.getText().toString());
             if (title.isEmpty()) { snack(t("Write a title first", "আগে টাইটেল লেখো")); return; }
-            st.addTask(title, subj[0], xp[0]);
+            st.addTask(title, subj[0], xp[0], due[0]);
             dlg.dismiss();
             afterChange();
         }), ui.lpm(0, Ui.W, 6, 0, 0, 0));
@@ -162,6 +194,257 @@ abstract class TabsB extends TabsA {
         weight(btns.getChildAt(1));
         d.addView(btns, ui.lpm(Ui.M, Ui.W, 0, 18, 0, 0));
         dlg.show();
+    }
+
+    void examDialog() {
+        LinearLayout d = ui.dialogCard();
+        d.addView(ui.tvM(t("New exam / deadline", "নতুন পরীক্ষা/ডেডলাইন"), 20, pal.text));
+        final EditText e = ui.input(t("e.g. EMB101 Midterm", "যেমন: EMB101 মিডটার্ম"), "",
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        d.addView(e, ui.lpm(Ui.M, Ui.W, 0, 14, 0, 0));
+        final String[] subj = {""};
+        final String[] exd = {st.dayOffset(7)};
+        d.addView(ui.caps(t("Subject (optional)", "সাবজেক্ট (ঐচ্ছিক)"), pal.dim), ui.lpm(Ui.W, Ui.W, 2, 16, 0, 8));
+        final LinearLayout sr = ui.hbox();
+        final List<String[]> subs = st.subjects();
+        final LinearLayout dr = ui.hbox();
+        final Runnable[] paint = new Runnable[1];
+        paint[0] = () -> {
+            sr.removeAllViews();
+            sr.addView(ui.chip(t("None", "নেই"), subj[0].isEmpty(), v -> { subj[0] = ""; paint[0].run(); }), ui.lpm(Ui.W, Ui.W, 0, 0, 8, 0));
+            for (final String[] a : subs) {
+                sr.addView(ui.chipColor(a[0], a[0].equals(subj[0]), st.subjectColor(a[0]), v -> { subj[0] = a[0]; paint[0].run(); }), ui.lpm(Ui.W, Ui.W, 0, 0, 8, 0));
+            }
+            dr.removeAllViews();
+            int[] dpresets = {3, 7, 14, 30};
+            String[] dlabels = {t("3 days", "৩ দিন"), t("1 week", "১ সপ্তাহ"), t("2 weeks", "২ সপ্তাহ"), t("1 month", "১ মাস")};
+            for (int i = 0; i < dpresets.length; i++) {
+                final String dd = st.dayOffset(dpresets[i]);
+                dr.addView(ui.chip(dlabels[i], exd[0].equals(dd), v -> { exd[0] = dd; paint[0].run(); }), ui.lpm(Ui.W, Ui.W, 0, 0, 8, 0));
+            }
+            boolean custom = !exd[0].equals(st.dayOffset(3)) && !exd[0].equals(st.dayOffset(7)) && !exd[0].equals(st.dayOffset(14)) && !exd[0].equals(st.dayOffset(30));
+            dr.addView(ui.chip(custom ? t("Custom: ", "কাস্টম: ") + exd[0] : "✎ " + t("Custom", "কাস্টম"), custom, v ->
+                    promptText(t("How many days from now?", "আজ থেকে কত দিন পরে?"), t("Days", "দিন"), "7", InputType.TYPE_CLASS_NUMBER,
+                            s2 -> { exd[0] = st.dayOffset(Math.max(1, parseInt(s2, 7))); paint[0].run(); })));
+        };
+        paint[0].run();
+        d.addView(ui.hscroll(sr));
+        d.addView(ui.caps(t("Date", "তারিখ"), pal.dim), ui.lpm(Ui.W, Ui.W, 2, 16, 0, 8));
+        d.addView(ui.hscroll(dr));
+        final Dialog dlg = ui.dialog(d);
+        LinearLayout btns = ui.hbox();
+        btns.addView(ui.button(t("Cancel", "বাতিল"), false, v -> dlg.dismiss()), ui.lpm(0, Ui.W, 0, 0, 6, 0));
+        btns.addView(ui.button(t("Add", "যোগ করো"), true, v -> {
+            String name = Store.clean(e.getText().toString());
+            if (name.isEmpty()) { snack(t("Write a name first", "আগে নাম লেখো")); return; }
+            st.addExam(name, subj[0], exd[0]);
+            dlg.dismiss();
+            afterChange();
+        }), ui.lpm(0, Ui.W, 6, 0, 0, 0));
+        weight(btns.getChildAt(0));
+        weight(btns.getChildAt(1));
+        d.addView(btns, ui.lpm(Ui.M, Ui.W, 0, 18, 0, 0));
+        dlg.show();
+    }
+
+    private View examRow(final Store.Exam ex, String todayStr) {
+        LinearLayout r = ui.hbox();
+        r.setPadding(0, ui.dp(10), 0, ui.dp(10));
+        LinearLayout mid = ui.vbox();
+        mid.addView(ui.tvM(ex.name, 15, pal.text));
+        LinearLayout sub = ui.hbox();
+        boolean any = false;
+        if (!ex.subject.isEmpty()) { sub.addView(ui.tv(ex.subject, 12, st.subjectColor(ex.subject))); any = true; }
+        if (any) sub.addView(ui.tv("  ·  ", 12, pal.dim));
+        sub.addView(ui.tv(ex.date, 12, pal.dim));
+        mid.addView(sub, ui.lpm(Ui.W, Ui.W, 0, 3, 0, 0));
+        r.addView(mid, ui.lpm(0, Ui.W, 12, 0, 8, 0));
+        weight(mid);
+        String cd;
+        int color;
+        int days = daysBetween(todayStr, ex.date);
+        if (days < 0) { cd = t("Passed", "শেষ হয়ে গেছে"); color = pal.dim; }
+        else if (days == 0) { cd = t("Today", "আজ"); color = pal.danger; }
+        else if (days == 1) { cd = t("Tomorrow", "আগামীকাল"); color = pal.danger; }
+        else { cd = t("In ", "বাকি ") + days + t(" days", " দিন"); color = days <= 3 ? pal.danger : pal.gold; }
+        r.addView(ui.tvM(cd, 13, color));
+        r.addView(smallBtn("✕", Color.TRANSPARENT, pal.dim, v -> confirm(t("Delete?", "মুছবে?"), ex.name, t("Delete", "মুছো"), true, () -> {
+            st.deleteExam(ex.id);
+            afterChange();
+        })), ui.lpm(ui.dp(30), ui.dp(30), 10, 0, 0, 0));
+        return r;
+    }
+
+    private int daysBetween(String from, String to) {
+        try {
+            java.text.SimpleDateFormat f = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US);
+            long diffMs = f.parse(to).getTime() - f.parse(from).getTime();
+            return (int) Math.round(diffMs / 86400000.0);
+        } catch (Exception ex) {
+            return 0;
+        }
+    }
+
+    void subjectGoalDialog(final String name, int current) {
+        LinearLayout d = ui.dialogCard();
+        d.addView(ui.tvM(t("Daily goal — ", "দৈনিক লক্ষ্য — ") + name, 20, pal.text));
+        d.addView(ui.tv(t("Minutes of focus in this subject per day. Leave at 0 for no separate goal.",
+                "এই সাবজেক্টে দৈনিক কত মিনিট ফোকাস করবে তা ঠিক করো। ০ রাখলে আলাদা লক্ষ্য থাকবে না।"), 13, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 8, 0, 14));
+        final EditText m = ui.input(t("Minutes (0 = off)", "মিনিট (০ = বন্ধ)"), String.valueOf(current), InputType.TYPE_CLASS_NUMBER);
+        d.addView(m, ui.lpm(Ui.M, Ui.W, 0, 0, 0, 10));
+        LinearLayout pr = ui.hbox();
+        int[] gs = {0, 20, 30, 45, 60};
+        for (final int g : gs) {
+            pr.addView(ui.chip(g == 0 ? t("Off", "বন্ধ") : dur(g), current == g, v -> m.setText(String.valueOf(g))), ui.lpm(Ui.W, Ui.W, 0, 0, 8, 0));
+        }
+        d.addView(ui.hscroll(pr));
+        final Dialog dlg = ui.dialog(d);
+        LinearLayout btns = ui.hbox();
+        btns.addView(ui.button(t("Cancel", "বাতিল"), false, v -> dlg.dismiss()), ui.lpm(0, Ui.W, 0, 0, 6, 0));
+        btns.addView(ui.button(t("Save", "সেভ"), true, v -> {
+            st.setSubjectGoal(name, Math.max(0, parseInt(m.getText().toString(), 0)));
+            dlg.dismiss();
+            afterChange();
+        }), ui.lpm(0, Ui.W, 6, 0, 0, 0));
+        weight(btns.getChildAt(0));
+        weight(btns.getChildAt(1));
+        d.addView(btns, ui.lpm(Ui.M, Ui.W, 0, 18, 0, 0));
+        dlg.show();
+    }
+
+    // ---------------------------------------------------------------- task row
+    private View taskRow(final Store.Task k, final String badge) {
+        LinearLayout r = ui.hbox();
+        r.setPadding(0, ui.dp(10), 0, ui.dp(10));
+        TextView box = ui.tvM(k.done ? "✓" : "", 16, pal.onAccent);
+        box.setGravity(Gravity.CENTER);
+        android.graphics.drawable.GradientDrawable bg = ui.shape(k.done ? pal.accent : Color.TRANSPARENT, 8, k.done ? pal.accent : pal.dim, 2);
+        box.setBackground(bg);
+        r.addView(box, new LinearLayout.LayoutParams(ui.dp(26), ui.dp(26)));
+        LinearLayout mid = ui.vbox();
+        TextView tt = ui.tvM(k.title, 15, k.done ? pal.dim : pal.text);
+        if (k.done) tt.setPaintFlags(tt.getPaintFlags() | android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);
+        mid.addView(tt);
+        LinearLayout sub = ui.hbox();
+        boolean any = false;
+        if (!k.subject.isEmpty()) { sub.addView(ui.tv(k.subject, 12, st.subjectColor(k.subject))); any = true; }
+        if (badge != null) {
+            if (any) sub.addView(ui.tv("  ·  ", 12, pal.dim));
+            boolean overdue = badge.equals(t("Overdue", "মেয়াদ শেষ"));
+            sub.addView(ui.tv(badge, 12, overdue ? pal.danger : pal.gold));
+            any = true;
+        }
+        if (!k.subs.isEmpty()) {
+            int sdone = 0;
+            for (Store.Task.Sub sb : k.subs) if (sb.done) sdone++;
+            TextView sp = ui.tvM(sdone + "/" + k.subs.size(), 12, pal.dim);
+            sp.setPadding(ui.dp(8), ui.dp(4), ui.dp(8), ui.dp(4));
+            sp.setBackground(ui.shape(pal.surface2, 10));
+            sp.setClickable(true);
+            sp.setOnClickListener(v -> subtasksDialog(k));
+            sub.addView(sp, ui.lpm(Ui.W, Ui.W, any ? 6 : 0, 0, 0, 0));
+            any = true;
+        }
+        if (any) mid.addView(sub, ui.lpm(Ui.W, Ui.W, 0, 3, 0, 0));
+        r.addView(mid, ui.lpm(0, Ui.W, 12, 0, 8, 0));
+        weight(mid);
+        r.addView(ui.tvM("+" + k.xp, 14, pal.gold));
+        r.addView(smallBtn("☰", Color.TRANSPARENT, pal.dim, v -> subtasksDialog(k)), ui.lpm(ui.dp(30), ui.dp(30), 6, 0, 0, 0));
+        r.addView(smallBtn("✕", Color.TRANSPARENT, pal.dim, v -> confirm(t("Delete task?", "টাস্ক মুছবে?"), k.title,
+                t("Delete", "মুছো"), true, () -> {
+                    if (k.done) { st.addBonus(-k.xp); st.unlogAct("T", k.title, k.xp); }
+                    st.deleteTask(k.id);
+                    afterChange();
+                })), ui.lpm(ui.dp(34), ui.dp(34), 2, 0, 0, 0));
+        r.setOnClickListener(v -> {
+            int d = st.toggleTask(k.id);
+            if (d > 0) { Sfx.success(st, this); snack("+" + d + " XP ✅"); }
+            else if (d < 0) { Sfx.tap(st, this); snack(d + " XP"); }
+            afterChange();
+        });
+        return r;
+    }
+
+    /** Checklist dialog for a task's subtasks: toggle, add, delete — stays open and repaints after each change. */
+    void subtasksDialog(final Store.Task task) {
+        LinearLayout d = ui.dialogCard();
+        d.addView(ui.tvM(t("Subtasks", "সাব-টাস্ক"), 20, pal.text));
+        d.addView(ui.tv(task.title, 13, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 4, 0, 10));
+        final LinearLayout list = ui.vbox();
+        final Runnable[] paint = new Runnable[1];
+        paint[0] = () -> {
+            list.removeAllViews();
+            Store.Task fresh = null;
+            for (Store.Task x : st.tasks()) if (x.id.equals(task.id)) fresh = x;
+            if (fresh == null || fresh.subs.isEmpty()) {
+                list.addView(ui.tv(t("No subtasks yet. Break this task into smaller steps below.", "এখনো কোনো সাব-টাস্ক নেই। নিচে ছোট ছোট ধাপে ভাগ করো।"), 13, pal.dim),
+                        ui.lpm(Ui.W, Ui.W, 0, 0, 0, 10));
+            } else {
+                for (int i = 0; i < fresh.subs.size(); i++) {
+                    final Store.Task.Sub sb = fresh.subs.get(i);
+                    if (i > 0) list.addView(divider());
+                    LinearLayout row = ui.hbox();
+                    row.setPadding(0, ui.dp(8), 0, ui.dp(8));
+                    TextView box = ui.tvM(sb.done ? "✓" : "", 13, pal.onAccent);
+                    box.setGravity(Gravity.CENTER);
+                    box.setBackground(ui.shape(sb.done ? pal.accent : Color.TRANSPARENT, 6, sb.done ? pal.accent : pal.dim, 2));
+                    row.addView(box, new LinearLayout.LayoutParams(ui.dp(22), ui.dp(22)));
+                    TextView tt = ui.tv(sb.title, 14, sb.done ? pal.dim : pal.text);
+                    if (sb.done) tt.setPaintFlags(tt.getPaintFlags() | android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);
+                    row.addView(tt, ui.lpm(0, Ui.W, 10, 0, 6, 0));
+                    weight(tt);
+                    row.addView(smallBtn("✕", Color.TRANSPARENT, pal.dim, v -> { st.deleteSubtask(task.id, sb.id); paint[0].run(); }),
+                            new LinearLayout.LayoutParams(ui.dp(28), ui.dp(28)));
+                    row.setOnClickListener(v -> { st.toggleSubtask(task.id, sb.id); paint[0].run(); });
+                    list.addView(row);
+                }
+            }
+        };
+        paint[0].run();
+        d.addView(list, ui.lpm(Ui.M, Ui.W, 0, 0, 0, 4));
+        final EditText add = ui.input(t("e.g. Read chapter 2", "যেমন: চ্যাপ্টার ২ পড়ো"), "",
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        LinearLayout addRow = ui.hbox();
+        addRow.addView(add, ui.lpm(0, Ui.W, 0, 0, 8, 0));
+        weight(add);
+        addRow.addView(smallBtn("+", pal.accent, pal.onAccent, v -> {
+            String title = Store.clean(add.getText().toString());
+            if (title.isEmpty()) return;
+            st.addSubtask(task.id, title);
+            add.setText("");
+            paint[0].run();
+        }), new LinearLayout.LayoutParams(ui.dp(40), ui.dp(40)));
+        d.addView(addRow, ui.lpm(Ui.M, Ui.W, 0, 10, 0, 0));
+        final Dialog dlg = ui.dialog(d);
+        d.addView(ui.button(t("Done", "হয়ে গেছে"), true, v -> { dlg.dismiss(); afterChange(); }), ui.lpm(Ui.M, Ui.W, 0, 18, 0, 0));
+        dlg.show();
+    }
+
+    /** "Today" / "Tomorrow" / "in N days" for an upcoming due date, given today's yyyy-MM-dd. */
+    private String dueLabel(String due, String today) {
+        if (due.equals(today)) return t("Due today", "আজ শেষ করতে হবে");
+        try {
+            java.text.SimpleDateFormat f = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US);
+            long diffMs = f.parse(due).getTime() - f.parse(today).getTime();
+            long days = Math.round(diffMs / 86400000.0);
+            if (days == 1) return t("Due tomorrow", "আগামীকাল শেষ করতে হবে");
+            if (days > 1) return t("Due in ", "বাকি ") + days + t(" days", " দিন");
+            return due;
+        } catch (Exception e) {
+            return due;
+        }
+    }
+
+    /** Formats remaining millis as "Xd Yh" / "Xh Ym" / "Xm" for a reward deadline countdown. */
+    private String deadlineLeftLabel(long leftMs) {
+        if (leftMs < 0) leftMs = 0;
+        long totalMin = leftMs / 60000;
+        long days = totalMin / 1440;
+        long hours = (totalMin % 1440) / 60;
+        long mins = totalMin % 60;
+        if (days > 0) return days + t("d ", "দিন ") + hours + t("h", " ঘ.");
+        if (hours > 0) return hours + t("h ", " ঘ. ") + mins + t("m", " মি.");
+        return mins + t("m", " মি.");
     }
 
     // ============================================================ STATS
@@ -486,6 +769,13 @@ abstract class TabsB extends TabsA {
                 c.addView(bar(xp / (float) r.xp, pal.gold, 8), ui.lpm(Ui.M, ui.dp(8), 0, 12, 0, 0));
                 c.addView(ui.tv(num(r.xp - xp) + t(" XP to go", " XP বাকি"), 13, pal.dim), ui.lpm(Ui.W, Ui.W, 0, 8, 0, 0));
             }
+            if (!r.claimed && r.deadline > 0) {
+                long left = r.deadline - System.currentTimeMillis();
+                boolean missed = left <= 0 && xp < r.xp;
+                c.addView(ui.tv((missed ? "⏰ " + t("Deadline missed", "ডেডলাইন পার হয়ে গেছে")
+                        : "⏳ " + deadlineLeftLabel(left) + " " + t("left", "বাকি")),
+                        12.5f, missed ? pal.danger : pal.gold), ui.lpm(Ui.W, Ui.W, 0, 8, 0, 0));
+            }
             col.addView(c, ui.lpm(Ui.M, Ui.W, 0, 10, 0, 0));
         }
     }
@@ -506,6 +796,54 @@ abstract class TabsB extends TabsA {
         d.addView(n, ui.lpm(Ui.M, Ui.W, 0, 14, 0, 0));
         d.addView(x, ui.lpm(Ui.M, Ui.W, 0, 10, 0, 0));
         d.addView(ui.tv(t("Your total XP now: ", "এখন মোট XP: ") + num(st.totalXp()), 12, pal.dim), ui.lpm(Ui.W, Ui.W, 4, 8, 0, 0));
+
+        // deadline (optional challenge): "reach this XP within so many days/hours/minutes"
+        long existingLeft = (edit != null && edit.deadline > 0) ? Math.max(0, edit.deadline - System.currentTimeMillis()) : 0;
+        final boolean[] useDl = {edit != null && edit.deadline > 0};
+        final EditText dDays = ui.input(t("Days", "দিন"), String.valueOf(existingLeft / 86400000L), InputType.TYPE_CLASS_NUMBER);
+        final EditText dHours = ui.input(t("Hours", "ঘণ্টা"), String.valueOf((existingLeft / 3600000L) % 24), InputType.TYPE_CLASS_NUMBER);
+        final EditText dMins = ui.input(t("Minutes", "মিনিট"), String.valueOf((existingLeft / 60000L) % 60), InputType.TYPE_CLASS_NUMBER);
+        final LinearLayout dlToggle = ui.hbox();
+        final LinearLayout dlFields = ui.hbox();
+        final View[] hmsRef = new View[1];
+        final View[] hintRef = new View[1];
+        final Runnable[] paintDl = new Runnable[1];
+        paintDl[0] = () -> {
+            dlToggle.removeAllViews();
+            dlToggle.addView(ui.chip(t("No deadline", "ডেডলাইন নেই"), !useDl[0], v -> { useDl[0] = false; paintDl[0].run(); }), ui.lpm(Ui.W, Ui.W, 0, 0, 8, 0));
+            dlToggle.addView(ui.chip(t("Challenge: set a deadline", "চ্যালেঞ্জ: ডেডলাইন দাও"), useDl[0], v -> { useDl[0] = true; paintDl[0].run(); }));
+            dlFields.setVisibility(useDl[0] ? View.VISIBLE : View.GONE);
+            if (hmsRef[0] != null) hmsRef[0].setVisibility(useDl[0] ? View.VISIBLE : View.GONE);
+            if (hintRef[0] != null) hintRef[0].setVisibility(useDl[0] ? View.VISIBLE : View.GONE);
+        };
+        paintDl[0].run();
+        d.addView(ui.caps(t("Deadline (optional)", "ডেডলাইন (ঐচ্ছিক)"), pal.dim), ui.lpm(Ui.W, Ui.W, 2, 16, 0, 8));
+        d.addView(ui.hscroll(dlToggle));
+        LinearLayout presetRow = ui.hbox();
+        int[] dpresets = {1, 3, 7, 14, 30};
+        String[] dplabels = {t("1 day", "১ দিন"), t("3 days", "৩ দিন"), t("1 week", "১ সপ্তাহ"), t("2 weeks", "২ সপ্তাহ"), t("1 month", "১ মাস")};
+        for (int i = 0; i < dpresets.length; i++) {
+            final int dv = dpresets[i];
+            presetRow.addView(ui.chip(dplabels[i], false, v -> {
+                dDays.setText(String.valueOf(dv)); dHours.setText("0"); dMins.setText("0");
+                useDl[0] = true; paintDl[0].run();
+            }), ui.lpm(Ui.W, Ui.W, 0, 0, 8, 0));
+        }
+        dlFields.addView(ui.hscroll(presetRow), ui.lpm(Ui.M, Ui.W, 0, 10, 0, 10));
+        d.addView(dlFields, ui.lpm(Ui.M, Ui.W, 0, 4, 0, 0));
+        LinearLayout hms = ui.hbox();
+        hms.addView(dDays, ui.lpm(0, Ui.W, 0, 0, 5, 0));
+        hms.addView(dHours, ui.lpm(0, Ui.W, 5, 0, 5, 0));
+        hms.addView(dMins, ui.lpm(0, Ui.W, 5, 0, 0, 0));
+        weight(hms.getChildAt(0)); weight(hms.getChildAt(1)); weight(hms.getChildAt(2));
+        hms.setVisibility(useDl[0] ? View.VISIBLE : View.GONE);
+        d.addView(hms, ui.lpm(Ui.M, Ui.W, 0, 0, 0, 0));
+        hmsRef[0] = hms;
+        final TextView hint = ui.tv(t("Days / hours / minutes from now. Saving restarts the countdown.", "এখন থেকে দিন/ঘণ্টা/মিনিট। সেভ করলে কাউন্টডাউন নতুন করে শুরু হবে।"), 11.5f, pal.dim);
+        hint.setVisibility(useDl[0] ? View.VISIBLE : View.GONE);
+        d.addView(hint, ui.lpm(Ui.W, Ui.W, 4, 6, 0, 0));
+        hintRef[0] = hint;
+
         final Dialog dlg = ui.dialog(d);
         LinearLayout btns = ui.hbox();
         btns.addView(ui.button(t("Cancel", "বাতিল"), false, v -> dlg.dismiss()), ui.lpm(0, Ui.W, 0, 0, 6, 0));
@@ -513,7 +851,14 @@ abstract class TabsB extends TabsA {
             String name = Store.clean(n.getText().toString());
             int xp = parseInt(x.getText().toString(), 0);
             if (name.isEmpty() || xp < 1) { snack(t("Enter a name and XP", "নাম আর XP দাও")); return; }
-            if (edit == null) st.addReward(name, xp); else st.updateReward(edit.id, name, xp);
+            long deadline = 0;
+            if (useDl[0]) {
+                long durMs = (parseInt(dDays.getText().toString(), 0) * 24L * 60L
+                        + parseInt(dHours.getText().toString(), 0) * 60L
+                        + parseInt(dMins.getText().toString(), 0)) * 60000L;
+                deadline = durMs > 0 ? System.currentTimeMillis() + durMs : 0;
+            }
+            if (edit == null) st.addReward(name, xp, deadline); else st.updateReward(edit.id, name, xp, deadline);
             dlg.dismiss();
             afterChange();
         }), ui.lpm(0, Ui.W, 6, 0, 0, 0));

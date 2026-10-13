@@ -310,6 +310,9 @@ abstract class TabsA extends BaseActivity {
             dots.addView(c, new LinearLayout.LayoutParams(0, Ui.W, 1f));
         }
         sc.addView(dots);
+        int ft = st.freezeTokens();
+        sc.addView(ui.tv("🧊 " + ft + t(" streak freeze" + (ft == 1 ? "" : "s") + " left this month", "টি স্ট্রিক ফ্রিজ বাকি এই মাসে"), 11.5f, pal.dim),
+                ui.lpm(Ui.W, Ui.W, 0, 10, 0, 0));
         col.addView(sc, ui.lpm(Ui.M, Ui.W, 0, 14, 0, 0));
 
         // tasks summary
@@ -350,6 +353,32 @@ abstract class TabsA extends BaseActivity {
 
         col.addView(ui.button(t("▶  Start focus", "▶  ফোকাস শুরু"), true, v -> { Sfx.tap(st, this); showTab(TAB_FOCUS, true); }),
                 ui.lpm(Ui.M, Ui.W, 0, 18, 0, 0));
+        if (!st.sessionOpen()) {
+            col.addView(ui.button(t("⚡  2-min quick start", "⚡  ২-মিনিট কুইক স্টার্ট"), false, v -> quickStart2Min()),
+                    ui.lpm(Ui.M, Ui.W, 0, 10, 0, 0));
+        }
+    }
+
+    /** Starts a 2-minute session immediately, skipping the setup screen — lowers the barrier to just begin. */
+    void quickStart2Min() {
+        if (st.sessionOpen()) { showTab(TAB_FOCUS, true); return; }
+        Sfx.tap(st, this);
+        askNotifPermission();
+        initFocus();
+        List<String[]> subs = st.subjects();
+        String subj = selSubject;
+        boolean found = false;
+        for (String[] a : subs) if (a[0].equals(subj)) found = true;
+        if (!found) {
+            subj = st.lastSubject();
+            found = false;
+            for (String[] a : subs) if (a[0].equals(subj)) found = true;
+            if (!found) subj = subs.isEmpty() ? "" : subs.get(0)[0];
+        }
+        st.setLastSubject(subj);
+        st.sessionStart(0, 2, st.pomoWork(), st.pomoBreak(), subj);
+        FocusService.start(this);
+        showTab(TAB_FOCUS, true);
     }
 
     // ============================================================ FOCUS

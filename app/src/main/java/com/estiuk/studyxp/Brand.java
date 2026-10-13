@@ -6,7 +6,7 @@ package com.estiuk.studyxp;
  */
 final class Brand {
     static String NAME = "istii_the_great";
-    static final String VERSION = "5.0";
+    static final String VERSION = "5.2";
 
     private Brand() { }
 }
